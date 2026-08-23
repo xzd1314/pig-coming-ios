@@ -1140,6 +1140,8 @@ function doAttack() {
   if (attackAnimTimer > 0) return;
   // 客户端死亡时禁止攻击
   if (MP.mode === 'client' && MP._clientDead) return;
+  // 房主死亡时禁止攻击
+  if (MP.mode === 'host' && MP._hostDead) return;
   attackStage = (attackStage % 3) + 1;
   attackAnimTimer = 0.35;
   if (attackStage === 1) playSfx(sfxAttack1);
@@ -1422,8 +1424,8 @@ function updateNormalGame(dt) {
   }
   camera.position.set(player.x, PLAYER_H+player.jumpY, player.z);
   camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
-  // 打猪模式：猪死重生（单机模式，联机模式由hostUpdateExtraBots处理）
-  if (gameMode === 'hunt' && MP.mode === 'offline' && !nextbot.alive) {
+  // 打猪模式：猪死重生（单机和联机主机模式，客户端由服务端同步）
+  if (gameMode === 'hunt' && MP.mode !== 'client' && !nextbot.alive) {
     if (nextbot.respawnTimer === undefined) nextbot.respawnTimer = 3;
     nextbot.respawnTimer -= dt;
     if (nextbot.respawnTimer <= 0) {
@@ -1477,8 +1479,10 @@ function updateNormalGame(dt) {
   // 毒气
   if (settings.gasMode) updateGasParticles(dt);
   if (settings.dayMode) updateClouds(dt);
-  // 碰撞判定
-  if (nextbot.alive && dist < NEXTBOT_SIZE*0.55 + PLAYER_RADIUS) {
+  // 碰撞判定（重新计算距离，因为猪在本帧内已移动）
+  const cdx = player.x - nextbot.x, cdz = player.z - nextbot.z;
+  const cdist = Math.sqrt(cdx*cdx + cdz*cdz);
+  if (nextbot.alive && cdist < NEXTBOT_SIZE*0.55 + PLAYER_RADIUS) {
     if (gameMode === 'hunt') {
       // 打猪模式：扣血
       if (playerHitCooldown <= 0) {
@@ -1486,14 +1490,14 @@ function updateNormalGame(dt) {
         playerHitCooldown = 0.8;
         updateHealthUI();
         danger.style.opacity = '0.8';
-        setTimeout(() => { if (gameRunning) danger.style.opacity = (dist<7?(1-dist/7).toString():'0'); }, 200);
+        setTimeout(() => { if (gameRunning) danger.style.opacity = (cdist<7?(1-cdist/7).toString():'0'); }, 200);
         if (playerHealth <= 0) { gameOver('dead'); return; }
       }
     } else if (MP.mode === 'host') {
       // 联机主机：扣血复活制
       if (hostOnHostHit()) {
         danger.style.opacity = '0.8';
-        setTimeout(() => { if (gameRunning) danger.style.opacity = (dist<7?(1-dist/7).toString():'0'); }, 200);
+        setTimeout(() => { if (gameRunning) danger.style.opacity = (cdist<7?(1-cdist/7).toString():'0'); }, 200);
       }
     } else {
       gameOver();
@@ -1501,6 +1505,8 @@ function updateNormalGame(dt) {
   }
 }
 function updatePvpGame(dt) {
+  // PVP模式：房主死亡时禁止移动
+  if (MP.mode === 'host' && MP._hostDead) return;
   // PVP模式：玩家移动，空旷场地，没有猪
   const speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;
   const fwd = {x: -Math.sin(player.yaw), z: -Math.cos(player.yaw)};
@@ -1617,6 +1623,11 @@ function doJump() {
   if (!gameRunning || gamePaused) return;
   // 黑猪模式：坐着时跳=下来
   if (gameMode === 'blackpig' && deskChair.isSitting) {
+    // 客户端模式：发送站起请求给服务端
+    if (MP.mode === 'client') {
+      MP._clientStandRequest = true;
+      return;
+    }
     deskChair.isSitting = false;
     standUpCooldown = 1.0; // 1秒内不检测课桌椅碰撞，避免立刻又坐下
     // 从椅子上起来，往玩家面朝方向移动3米，确保离开碰撞范围
