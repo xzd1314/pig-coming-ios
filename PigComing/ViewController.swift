@@ -101,11 +101,18 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         case "startServer":
             let port = (args["port"] as? Int).flatMap { UInt16($0) } ?? serverPort
             serverPort = port
-            if let p = wsServer.start(port: port) {
-                serverPort = p
-                isHost = true
-                let ip = udpManager.getLocalIP()
-                jsCall("NativeCallback.onServerStarted('\(ip)', \(p))")
+            wsServer.start(port: port) { [weak self] p in
+                guard let self = self, let p = p else {
+                    print("[WS] start failed")
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.serverPort = p
+                    self.isHost = true
+                    let ip = self.udpManager.getLocalIP()
+                    print("[WS] server started: \(ip):\(p)")
+                    self.jsCall("NativeCallback.onServerStarted('\(ip)', \(p))")
+                }
             }
         case "stopServer":
             wsServer.stop()

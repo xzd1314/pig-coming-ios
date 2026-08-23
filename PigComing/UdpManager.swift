@@ -54,24 +54,49 @@ class UdpManager {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         if getifaddrs(&ifaddr) == 0 {
             var ptr = ifaddr
+            // 第一遍：优先找en0（WiFi）的192.168.x地址
             while ptr != nil {
                 defer { ptr = ptr?.pointee.ifa_next }
                 guard let interface = ptr?.pointee else { continue }
+                let name = String(cString: interface.ifa_name)
                 let flags = interface.ifa_flags
                 if (flags & UInt32(IFF_UP)) == 0 || (flags & UInt32(IFF_LOOPBACK)) != 0 { continue }
-                if interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
+                if name == "en0", interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
                     var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                     if getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
                                    &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
                         let ip = String(cString: hostname)
                         if ip.hasPrefix("192.168.") || ip.hasPrefix("10.") || ip.hasPrefix("172.") {
                             address = ip
-                            break
+                            freeifaddrs(ifaddr)
+                            return address
                         }
                     }
                 }
             }
             freeifaddrs(ifaddr)
+            // 第二遍：找任意接口的局域网地址
+            if getifaddrs(&ifaddr) == 0 {
+                ptr = ifaddr
+                while ptr != nil {
+                    defer { ptr = ptr?.pointee.ifa_next }
+                    guard let interface = ptr?.pointee else { continue }
+                    let flags = interface.ifa_flags
+                    if (flags & UInt32(IFF_UP)) == 0 || (flags & UInt32(IFF_LOOPBACK)) != 0 { continue }
+                    if interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
+                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                        if getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                                       &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
+                            let ip = String(cString: hostname)
+                            if ip.hasPrefix("192.168.") {
+                                address = ip
+                                break
+                            }
+                        }
+                    }
+                }
+                freeifaddrs(ifaddr)
+            }
         }
         return address
     }

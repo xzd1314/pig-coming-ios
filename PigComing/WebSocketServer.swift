@@ -10,20 +10,33 @@ class WebSocketServer {
     var onClientDisconnect: ((String) -> Void)?
     var onMessage: ((String, String) -> Void)?
 
-    func start(port: UInt16) -> UInt16? {
+    func start(port: UInt16, completion: @escaping (UInt16?) -> Void) {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         do {
             listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         } catch {
             print("[WS] listener error: \(error)")
-            return nil
+            completion(nil)
+            return
         }
         listener?.newConnectionHandler = { [weak self] conn in
             self?.handleConnection(conn)
         }
+        listener?.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                let actualPort = self?.listener?.port?.rawValue ?? port
+                print("[WS] server ready on port \(actualPort)")
+                completion(actualPort)
+            case .failed(let error):
+                print("[WS] server failed: \(error)")
+                completion(nil)
+            default:
+                break
+            }
+        }
         listener?.start(queue: .global())
-        return listener?.port?.rawValue ?? port
     }
 
     func stop() {
