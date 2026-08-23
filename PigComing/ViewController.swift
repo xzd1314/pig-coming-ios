@@ -48,18 +48,28 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
 
     private func setupCallbacks() {
         wsServer.onClientConnect = { [weak self] clientId in
-            self?.jsCall("Bridge.onClientConnect('\(clientId)')")
+            self?.jsCall("NativeCallback.onClientConnected('\(clientId)')")
         }
         wsServer.onClientDisconnect = { [weak self] clientId in
-            self?.jsCall("Bridge.onClientDisconnect('\(clientId)')")
+            self?.jsCall("NativeCallback.onClientDisconnected('\(clientId)')")
         }
         wsServer.onMessage = { [weak self] clientId, msg in
             let escaped = msg.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\n", with: "\\n")
-            self?.jsCall("Bridge.onHostMessage('\(clientId)', '\(escaped)')")
+            self?.jsCall("NativeCallback.onMessage('\(clientId)', '\(escaped)')")
         }
         udpManager.onRoomFound = { [weak self] msg, ip in
-            let escaped = msg.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\n", with: "\\n")
-            self?.jsCall("Bridge.onRoomFound('\(escaped)', '\(ip)')")
+            // JS端onRoomFound只接受一个JSON字符串参数，需要把ip合并进去
+            var merged = msg
+            if let data = msg.data(using: .utf8),
+               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                json["ip"] = ip
+                if let mergedData = try? JSONSerialization.data(withJSONObject: json),
+                   let mergedStr = String(data: mergedData, encoding: .utf8) {
+                    merged = mergedStr
+                }
+            }
+            let escaped = merged.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\n", with: "\\n")
+            self?.jsCall("NativeCallback.onRoomFound('\(escaped)')")
         }
     }
 
@@ -95,12 +105,13 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
                 serverPort = p
                 isHost = true
                 let ip = udpManager.getLocalIP()
-                jsCall("Bridge.onServerReady('\(ip)', \(p))")
+                jsCall("NativeCallback.onServerStarted('\(ip)', \(p))")
             }
         case "stopServer":
             wsServer.stop()
             udpManager.stopBroadcast()
             isHost = false
+            jsCall("NativeCallback.onServerStopped()")
         case "startBroadcast":
             if let info = args["roomInfo"] as? String {
                 udpManager.startBroadcast(roomInfo: info, port: 8766)
@@ -133,7 +144,7 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
             }
         case "getLocalIP":
             let ip = udpManager.getLocalIP()
-            jsCall("Bridge.onLocalIP('\(ip)')")
+            jsCall("NativeCallback.onLocalIP('\(ip)')")
         default:
             break
         }
@@ -150,9 +161,10 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         clientConnection = session.webSocketTask(with: url)
         clientConnection?.resume()
         receiveClientMessage()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        // 连接成功后延迟回调，确保WebSocket握手完成
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.clientConnected = true
-            self?.jsCall("Bridge.onConnected()")
+            self?.jsCall("NativeCallback.onConnected()")
         }
     }
 
@@ -175,11 +187,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
             case .success(let message):
                 if case .string(let text) = message {
                     let escaped = text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\n", with: "\\n")
-                    self?.jsCall("Bridge.onClientMessage('\(escaped)')")
+                    self?.jsCall("NativeCallback.onServerMessage('\(escaped)')")
                 }
                 self?.receiveClientMessage()
             case .failure:
-                self?.jsCall("Bridge.onDisconnected()")
+                self?.jsCall("NativeCallback.onDisconnected()")
             }
         }
     }
@@ -187,7 +199,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     // MARK: - 工具
     private func jsCall(_ script: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.webView.evaluateJavaScript(script, completionHandler: nil)
+            self?.webView.evaluateJavaScript(script, completionHandler: { _, error in
+                if let error = error {
+                    print("[JS] error: \(error)")
+                }
+            })
         }
     }
 
