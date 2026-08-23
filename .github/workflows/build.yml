@@ -1,0 +1,52 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build app
+      run: |
+        set -o pipefail
+        xcodebuild -project PigComing.xcodeproj \
+          -scheme PigComing \
+          -configuration Release \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          build 2>&1 | tee build.log | tail -80
+        echo "EXIT_CODE=${PIPESTATUS[0]}"
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then echo "BUILD FAILED"; exit 1; fi
+
+    - name: Find app
+      run: |
+        echo "=== Searching for .app ==="
+        find build -name "*.app" -type d
+        APP_PATH=$(find build -name "PigComing.app" -type d | head -1)
+        echo "APP_PATH=$APP_PATH"
+        if [ -z "$APP_PATH" ]; then echo "APP NOT FOUND"; exit 1; fi
+        echo "=== App contents ==="
+        ls -la "$APP_PATH"
+
+    - name: Package IPA
+      run: |
+        APP_PATH=$(find build -name "PigComing.app" -type d | head -1)
+        mkdir -p Payload
+        cp -R "$APP_PATH" Payload/
+        zip -r PigComing.ipa Payload
+        ls -lh PigComing.ipa
+
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: PigComing-unsigned-ipa
+        path: PigComing.ipa
+        retention-days: 30
