@@ -313,6 +313,7 @@
   .mp-room-players { font-size: 14px; color: #ffaa44; font-weight: bold; }
   #mpEmptyHint {
     text-align: center; color: #666; font-size: 15px; padding: 60px 20px;
+    white-space: pre-line;
   }
   #mpScanIndicator {
     text-align: center; color: #ff6666; font-size: 13px; padding: 8px;
@@ -367,6 +368,7 @@
     width: 300px; max-width: 90vw; padding: 10px 18px; margin-bottom: 8px;
     background: rgba(60,160,60,0.15); border: 1px solid rgba(60,180,60,0.4);
     border-radius: 8px; font-size: 13px; color: #66dd66; display: none;
+    white-space: pre-line; word-break: break-all;
   }
   .mp-connecting-info {
     width: 300px; max-width: 90vw; padding: 10px 18px; margin-bottom: 8px;
@@ -403,7 +405,7 @@
 <!-- 设置面板 -->
 <div id="settingsPanel">
   <h2>设置</h2>
-  <div class="mp-server-info" id="mpServerInfo">局域网联机已开启\nIP: -- 端口: 8765</div>
+  <div class="mp-server-info" id="mpServerInfo">局域网联机已开启<br>IP: -- 端口: 8765</div>
   <div class="mp-connecting-info" id="mpConnectInfo">已连接到房间</div>
   <div class="setting-row" id="mpToggleRow"><label>局域网联机</label><div class="toggle" id="toggleMultiplayer"></div></div>
   <div class="setting-row"><label>猪移动速度</label><input type="range" id="pigSpeedSlider" min="1" max="10" value="1"><span class="slider-val" id="pigSpeedVal">1</span></div>
@@ -464,7 +466,7 @@
   </div>
   <div id="mpScanIndicator">正在扫描局域网房间...</div>
   <div id="mpRoomList">
-    <div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网\n或点击右上角手动输入IP</div>
+    <div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网<br>或点击右上角手动输入IP</div>
   </div>
 </div>
 <!-- 改名弹窗 -->
@@ -555,9 +557,10 @@ let swordMesh = null;
 let swordGroup = null;
 let pigHitCooldown = 0;
 let playerHitCooldown = 0;
+let pvpKills = 0;
 // 黑猪模式状态
 let blackpig = { mesh: null, frontTex: null, backTex: null, isWatching: false, turnTimer: 0, turnDuration: 0, isTurning: false, podiumMesh: null, x:0, z:-12 };
-let deskChair = { mesh: null, x: 0, z: 0, isSitting: false };
+let deskChair = { mesh: null, x: 0, z: 0, isSitting: false, sitLerp: 0, sitTargetX: 0, sitTargetZ: 0 };
 let standUpCooldown = 0;
 let originalFog = null;
 let blackpigAudioPlaying = null;
@@ -599,14 +602,17 @@ function initAudio() {
 }
 function playMenuBgm() {
   if (!menuBgm) return;
-  if (menuBgm.paused) { menuBgm.currentTime = 0; menuBgm.play().catch(e=>{}); }
+  if (menuBgm.paused) {
+    try { menuBgm.currentTime = 0; } catch(e) {}
+    menuBgm.play().catch(e=>{});
+  }
 }
 function stopMenuBgm() { if (!menuBgm) return; menuBgm.pause(); menuBgm.currentTime = 0; }
 function updateNextbotAudio(dist) {
   if (!nextbotAudio) return;
   const maxDist = 25;
-  let vol = dist < maxDist ? (1 - dist / maxDist) * 0.7 : 0;
-  nextbotAudio.volume = Math.max(0, Math.min(1, vol));
+  const vol = dist < maxDist ? (1 - dist / maxDist) * 0.7 : 0;
+  nextbotAudio.volume = vol;
   if (gameRunning && !gamePaused && dist < maxDist && nextbot.alive) {
     if (nextbotAudio.paused) nextbotAudio.play().catch(e=>{});
   } else { if (!nextbotAudio.paused) nextbotAudio.pause(); }
@@ -711,9 +717,9 @@ function astar(startR,startC,endR,endC){
   const key=(r,c)=>r+','+c; const h=(r,c)=>Math.abs(r-endR)+Math.abs(c-endC);
   gScore[key(startR,startC)]=0; fScore[key(startR,startC)]=h(startR,startC);
   open.push({r:startR,c:startC,f:fScore[key(startR,startC)]});
-  const dirs=[[-1,0],[1,0],[0,-1],[0,1]]; let iters=0;
-  while(open.length>0&&iters<500){
-    iters++; open.sort((a,b)=>a.f-b.f); const cur=open.shift(); const ck=key(cur.r,cur.c);
+  const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+  while(open.length>0){
+    open.sort((a,b)=>a.f-b.f); const cur=open.shift(); const ck=key(cur.r,cur.c);
     if(cur.r===endR&&cur.c===endC){const path=[];let c2=ck;while(c2){const[r,c]=c2.split(',').map(Number);path.unshift({r,c});c2=cameFrom[c2];}return path;}
     closed.add(ck);
     for(const[dr,dc]of dirs){const nr=cur.r+dr,nc=cur.c+dc,nk=key(nr,nc);if(!isWalkable(nr,nc)||closed.has(nk))continue;const tg=(gScore[ck]||0)+1;if(tg<(gScore[nk]||Infinity)){cameFrom[nk]=ck;gScore[nk]=tg;fScore[nk]=tg+h(nr,nc);if(!open.find(n=>n.r===nr&&n.c===nc))open.push({r:nr,c:nc,f:fScore[nk]});}}
@@ -979,11 +985,11 @@ function startGame(mode) {
   // 重置打猪模式
   playerHealth = 100; swordEquipped = false; attackStage = 0; attackAnimTimer = 0;
   pigHitCooldown = 0; playerHitCooldown = 0;
-  window.pvpKills = 0;
+  pvpKills = 0;
   if (swordGroup) swordGroup.visible = false;
   // 重置黑猪模式
   blackpig.isWatching = false; blackpig.turnTimer = 0; blackpig.turnDuration = 0; blackpig.isTurning = false;
-  deskChair.isSitting = false; standUpCooldown = 0;
+  deskChair.isSitting = false; deskChair.sitLerp = 0; standUpCooldown = 0;
   // 通用
   gameTime = 0; sprintActive = false; sprintTimer = 0; cooldownTimer = 0;
   gamePaused = false; gameRunning = true;
@@ -1004,6 +1010,18 @@ function startGame(mode) {
     playerHealth = 100;
     swordEquipped = true;
     if (swordGroup) swordGroup.visible = true;
+    // 单机PVP提示
+    if (MP.mode === 'offline') {
+      setTimeout(() => {
+        if (gameRunning && gameMode === 'pvp') {
+          const hint = document.createElement('div');
+          hint.style.cssText = 'position:fixed;top:30%;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#ffaa44;padding:16px 24px;border-radius:10px;font-size:16px;z-index:50;text-align:center;pointer-events:none;';
+          hint.textContent = 'PVP模式需要联机才能与其他玩家对战';
+          document.body.appendChild(hint);
+          setTimeout(() => hint.remove(), 4000);
+        }
+      }, 500);
+    }
   } else {
     if (nextbot.mesh) nextbot.mesh.visible = true;
     if (nextbot.glowMesh) nextbot.glowMesh.visible = true;
@@ -1058,6 +1076,7 @@ function returnToMenu() {
   if (nextbot.glowMesh) nextbot.glowMesh.visible = true;
   if (swordGroup) swordGroup.visible = false;
   swordEquipped = false; attackStage = 0;
+  pvpKills = 0;
   // 联机：返回主菜单=关闭房间/断开连接
   if (MP.mode !== 'offline') mpOnReturnMenu();
   // 重置联机UI
@@ -1081,13 +1100,19 @@ function returnToMenu() {
 }
 function pauseGame() {
   if (!gameRunning) return;
-  gamePaused = true;
-  document.getElementById('pauseLabel').style.display = 'block';
+  // 客户端模式：不暂停游戏（避免变相暂停作弊），仅打开设置面板
+  if (MP.mode !== 'client') {
+    gamePaused = true;
+    document.getElementById('pauseLabel').style.display = 'block';
+  }
   document.getElementById('settingsPanel').style.display = 'flex';
   if (nextbotAudio && !nextbotAudio.paused) nextbotAudio.pause();
 }
 function resumeGame() {
-  gamePaused = false;
+  // 客户端模式：仅关闭设置面板，不影响游戏状态
+  if (MP.mode !== 'client') {
+    gamePaused = false;
+  }
   document.getElementById('pauseLabel').style.display = 'none';
   document.getElementById('settingsPanel').style.display = 'none';
   // 联机主机：退出设置页 = 正式开局，广播startGame给所有客户端
@@ -1113,6 +1138,8 @@ function doAttack() {
   if ((gameMode !== 'hunt' && gameMode !== 'pvp') || !gameRunning || gamePaused) return;
   if (!swordEquipped) return;
   if (attackAnimTimer > 0) return;
+  // 客户端死亡时禁止攻击
+  if (MP.mode === 'client' && MP._clientDead) return;
   attackStage = (attackStage % 3) + 1;
   attackAnimTimer = 0.35;
   if (attackStage === 1) playSfx(sfxAttack1);
@@ -1174,7 +1201,7 @@ function checkPlayerHit() {
     if (p.health <= 0) {
       p.health = 0; p.dead = true; p.alive = false; p.respawnTimer = MP.RESPAWN_TIME;
       if (p.mesh) setPlayerDead(p.mesh, true);
-      window.pvpKills = (window.pvpKills || 0) + 1;
+      pvpKills++;
     }
   }
   if (hitAny) {
@@ -1183,7 +1210,6 @@ function checkPlayerHit() {
     setTimeout(() => flash.style.opacity = '0', 80);
   }
 }
-function checkPigHit() { checkAllPigsHit(); }
 function toggleSword() {
   if (gameMode !== 'hunt' || !gameRunning) return;
   swordEquipped = !swordEquipped;
@@ -1266,7 +1292,7 @@ function setupMenu() {
 function openMultiplayer() {
   document.getElementById('startScreen').style.display = 'none';
   document.getElementById('multiplayerScreen').style.display = 'flex';
-  document.getElementById('mpRoomList').innerHTML = '<div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网\n或点击右上角手动输入IP</div>';
+  document.getElementById('mpRoomList').innerHTML = '<div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网<br>或点击右上角手动输入IP</div>';
   MP.onRoomListUpdate = renderRoomList;
   startRoomScan();
 }
@@ -1279,7 +1305,7 @@ function closeMultiplayer() {
 function renderRoomList(rooms) {
   const list = document.getElementById('mpRoomList');
   if (rooms.length === 0) {
-    list.innerHTML = '<div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网\n或点击右上角手动输入IP</div>';
+    list.innerHTML = '<div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网<br>或点击右上角手动输入IP</div>';
     return;
   }
   list.innerHTML = '';
@@ -1370,7 +1396,6 @@ function update(dt) {
     if (settings.gasMode) updateGasParticles(dt);
     camera.position.set(player.x, PLAYER_H+player.jumpY, player.z);
     camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
-    if (settings.gasMode) updateGasParticles(dt);
     if (settings.dayMode) updateClouds(dt);
     return;
   }
@@ -1385,8 +1410,8 @@ function update(dt) {
 function updateNormalGame(dt) {
   // 玩家水平移动
   const speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;
-  const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const fwd = {x: -Math.sin(player.yaw), z: -Math.cos(player.yaw)};
+  const right = {x: Math.cos(player.yaw), z: -Math.sin(player.yaw)};
   const mx = (fwd.x*joystick.dy + right.x*joystick.dx)*speed*dt;
   const mz = (fwd.z*joystick.dy + right.z*joystick.dx)*speed*dt;
   moveWithCollision(player, mx, mz, PLAYER_RADIUS, settings.noclip);
@@ -1427,7 +1452,7 @@ function updateNormalGame(dt) {
       tx = wp.x; tz = wp.z;
       const dw = Math.sqrt((nextbot.x-wp.x)**2+(nextbot.z-wp.z)**2);
       if (dw < 0.8) nextbot.path.shift();
-    } else { tx = player.x; tz = player.z; }
+    } else { tx = nextbot.x; tz = nextbot.z; }
     const ndx = tx-nextbot.x, ndz = tz-nextbot.z;
     const nd = Math.sqrt(ndx*ndx+ndz*ndz);
     if (nd > 0.1) {
@@ -1478,15 +1503,15 @@ function updateNormalGame(dt) {
 function updatePvpGame(dt) {
   // PVP模式：玩家移动，空旷场地，没有猪
   const speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;
-  const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const fwd = {x: -Math.sin(player.yaw), z: -Math.cos(player.yaw)};
+  const right = {x: Math.cos(player.yaw), z: -Math.sin(player.yaw)};
   const mx = (fwd.x*joystick.dy + right.x*joystick.dx)*speed*dt;
   const mz = (fwd.z*joystick.dy + right.z*joystick.dx)*speed*dt;
   player.x += mx; player.z += mz;
-  // 边界限制（用黑猪场地大小）
+  // 边界限制（用黑猪场地大小，对称边界）
   const half = 30;
   player.x = Math.max(-half, Math.min(half, player.x));
-  player.z = Math.max(-half+8, Math.min(half, player.z));
+  player.z = Math.max(-half, Math.min(half, player.z));
   // 跳跃物理
   if (!player.onGround) {
     player.vy += GRAVITY*dt; player.jumpY += player.vy*dt;
@@ -1494,7 +1519,7 @@ function updatePvpGame(dt) {
   }
   camera.position.set(player.x, PLAYER_H+player.jumpY, player.z);
   camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
-  document.getElementById('distance').textContent = '击杀数: ' + (window.pvpKills || 0);
+  document.getElementById('distance').textContent = '击杀数: ' + pvpKills;
   if (settings.gasMode) updateGasParticles(dt);
   if (settings.dayMode) updateClouds(dt);
 }
@@ -1510,8 +1535,8 @@ function updateBlackpig(dt) {
   // 玩家移动
   let moving = false;
   const speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;
-  const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const fwd = {x: -Math.sin(player.yaw), z: -Math.cos(player.yaw)};
+  const right = {x: Math.cos(player.yaw), z: -Math.sin(player.yaw)};
   let mx = (fwd.x*joystick.dy + right.x*joystick.dx)*speed*dt;
   let mz = (fwd.z*joystick.dy + right.z*joystick.dx)*speed*dt;
   if (Math.abs(mx) > 0.001 || Math.abs(mz) > 0.001) moving = true;
@@ -1535,23 +1560,37 @@ function updateBlackpig(dt) {
   // 如果坐着，不能移动
   if (deskChair.isSitting) { mx = 0; mz = 0; }
   player.x += mx; player.z += mz;
-  // 边界限制
+  // 边界限制（对称边界）
   const half = blackpigFieldSize/2 - 2;
   player.x = Math.max(-half, Math.min(half, player.x));
-  player.z = Math.max(-half+8, Math.min(half, player.z));
+  player.z = Math.max(-half, Math.min(half, player.z));
   // 跳跃物理
   if (!player.onGround) {
     player.vy += GRAVITY*dt; player.jumpY += player.vy*dt;
     if (player.jumpY <= 0) { player.jumpY = 0; player.vy = 0; player.onGround = true; }
   }
   // 课桌椅碰撞检测：碰到=坐下（起身冷却期间不检测）
-  if (!deskChair.isSitting && standUpCooldown <= 0) {
+  if (!deskChair.isSitting && deskChair.sitLerp <= 0 && standUpCooldown <= 0) {
     const ddx = player.x - deskChair.x, ddz = player.z - deskChair.z;
     const ddist = Math.sqrt(ddx*ddx + ddz*ddz);
     if (ddist < 1.5) {
+      // 开始坐下过渡动画
+      deskChair.sitLerp = 1;
+      deskChair.sitTargetX = deskChair.x;
+      deskChair.sitTargetZ = deskChair.z + 1.2;
+    }
+  }
+  // 坐下过渡动画
+  if (deskChair.sitLerp > 0) {
+    deskChair.sitLerp -= dt * 5; // 0.2秒过渡
+    const t = 1 - Math.max(0, deskChair.sitLerp);
+    const easeT = t * t * (3 - 2 * t); // smoothstep
+    player.x += (deskChair.sitTargetX - player.x) * easeT * 0.3;
+    player.z += (deskChair.sitTargetZ - player.z) * easeT * 0.3;
+    if (deskChair.sitLerp <= 0) {
       deskChair.isSitting = true;
-      // 坐到椅子位置
-      player.x = deskChair.x; player.z = deskChair.z + 1.2;
+      player.x = deskChair.sitTargetX;
+      player.z = deskChair.sitTargetZ;
     }
   }
   camera.position.set(player.x, PLAYER_H+player.jumpY + (deskChair.isSitting ? -0.5 : 0), player.z);
@@ -1731,6 +1770,8 @@ function setupInput() {
       if (t.clientX < window.innerWidth*0.38) continue;
       if (t.clientY > window.innerHeight-110 && t.clientX > window.innerWidth-200) continue;
       if (t.clientY < 60 && t.clientX > window.innerWidth-70) continue;
+      // 排除底部中间物品栏区域
+      if (t.clientY > window.innerHeight-200 && t.clientX > window.innerWidth*0.3 && t.clientX < window.innerWidth*0.7) continue;
       if (!lookTouch.active) {
         lookTouch.active = true; lookTouch.id = t.identifier;
         lookTouch.lastX = t.clientX; lookTouch.lastY = t.clientY;
