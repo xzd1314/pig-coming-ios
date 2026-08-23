@@ -101,6 +101,40 @@ class UdpManager {
         return address
     }
 
+    func getBroadcastAddress() -> String {
+        // 获取WiFi接口(en0)的子网广播地址
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        if getifaddrs(&ifaddr) == 0 {
+            var ptr = ifaddr
+            while ptr != nil {
+                defer { ptr = ptr?.pointee.ifa_next }
+                guard let interface = ptr?.pointee else { continue }
+                let name = String(cString: interface.ifa_name)
+                guard name == "en0",
+                      interface.ifa_addr.pointee.sa_family == UInt8(AF_INET),
+                      let netmask = interface.ifa_netmask?.pointee else { continue }
+                let addr = interface.ifa_addr.pointee as! sockaddr_in
+                let mask = netmask as! sockaddr_in
+                let broadcastAddr = (addr.sin_addr.s_addr & mask.sin_addr.s_addr) | ~mask.sin_addr.s_addr
+                var broadcast = sockaddr_in()
+                broadcast.sin_addr = in_addr(s_addr: broadcastAddr)
+                if let cStr = inet_ntoa(broadcast.sin_addr) {
+                    let ip = String(cString: cStr)
+                    freeifaddrs(ifaddr)
+                    return ip
+                }
+            }
+            freeifaddrs(ifaddr)
+        }
+        // fallback: 根据本地IP推算
+        let localIP = getLocalIP()
+        let parts = localIP.split(separator: ".")
+        if parts.count == 4 {
+            return "\(parts[0]).\(parts[1]).\(parts[2]).255"
+        }
+        return "255.255.255.255"
+    }
+
     private func broadcastLoop(roomInfo: String, port: UInt16) {
         broadcastSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
         guard broadcastSocket >= 0 else { return }
