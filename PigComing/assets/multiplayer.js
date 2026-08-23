@@ -208,7 +208,7 @@ function hostBroadcastRoom() {
   Bridge.startBroadcast({
     type:'room', host:MP.myName, port:MP.roomPort,
     players:Object.keys(MP.players).length+1, maxPlayers:MP.MAX_PLAYERS,
-    mode:MP.selectedMode, inGame:gameRunning,
+    mode:gameMode, inGame:gameRunning,
   });
 }
 function handleHostMessage(clientId, msg) {
@@ -234,7 +234,7 @@ function handleHostMessage(clientId, msg) {
       // 客户端加入直接开局（如果游戏在运行）
       if (gameRunning) {
         MP.gameStarted = true; MP.selectedMode = gameMode;
-        Bridge.sendTo(clientId, JSON.stringify({type:'startGame', mode:gameMode}));
+        // welcome消息已带gameRunning，客户端会通过welcome分支开始游戏，不再单独发startGame避免重复
         sendFullState(clientId);
         syncSettingsTo(clientId);
       }
@@ -298,6 +298,19 @@ function buildState() {
 function hostBroadcastState() { Bridge.broadcast(JSON.stringify({type:'state', ...buildState()})); }
 function findSafeSpawn() {
   if (gameMode === 'pvp' || gameMode === 'blackpig') {
+    // 尝试多次找到不与其他玩家重叠的出生点
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const sp = {x:(Math.random()-0.5)*20, z:10+(Math.random()-0.5)*10};
+      let tooClose = false;
+      // 检查与主机的距离
+      if (Math.sqrt((sp.x-player.x)**2 + (sp.z-player.z)**2) < 3) tooClose = true;
+      // 检查与其他玩家的距离
+      for (const id in MP.players) {
+        const p = MP.players[id];
+        if (p && !p.dead && Math.sqrt((sp.x-p.x)**2 + (sp.z-p.z)**2) < 3) { tooClose = true; break; }
+      }
+      if (!tooClose) return sp;
+    }
     return {x:(Math.random()-0.5)*20, z:10+(Math.random()-0.5)*10};
   }
   const candidates = [];
@@ -344,7 +357,7 @@ function hostUpdateRemotePlayers(dt) {
         p.x += mx; p.z += mz;
         const half = 30;
         p.x = Math.max(-half, Math.min(half, p.x));
-        p.z = Math.max(-half+8, Math.min(half, p.z));
+        p.z = Math.max(-half, Math.min(half, p.z));
       } else {
         const nx = p.x+mx; if (!collides(nx,p.z,PLAYER_RADIUS) || settings.noclip) p.x = nx;
         const nz = p.z+mz; if (!collides(p.x,nz,PLAYER_RADIUS) || settings.noclip) p.z = nz;
@@ -393,14 +406,16 @@ function hostUpdateBots(dt) {
         const np = bot.path[1]; const wp = gridToWorld(np.c, np.r);
         mx = wp.x; mz = wp.z;
         if (Math.sqrt((bot.x-wp.x)**2+(bot.z-wp.z)**2) < 0.8) bot.path.shift();
-      } else { mx = tx; mz = tz; }
+      } else { mx = bot.x; mz = bot.z; }
       const ndx = mx-bot.x, ndz = mz-bot.z, nd = Math.sqrt(ndx*ndx+ndz*ndz);
-      if (nd > 0.1) { bot.x += (ndx/nd)*nextbotSpeed*dt; bot.z += (ndz/nd)*nextbotSpeed*dt; }
+      if (nd > 0.1) {
+        const mvx = (ndx/nd)*nextbotSpeed*dt;
+        const mvz = (ndz/nd)*nextbotSpeed*dt;
+        moveWithCollision(bot, mvx, mvz, NEXTBOT_SIZE*0.35, false);
+      }
     }
     bot.mesh.position.set(bot.x, NEXTBOT_SIZE/2+0.15, bot.z);
-    bot.mesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
     bot.glowMesh.position.copy(bot.mesh.position);
-    bot.glowMesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
     const targetX = bot.targetId === 'host' ? player.x : (MP.players[bot.targetId]?.x ?? player.x);
     const targetZ = bot.targetId === 'host' ? player.z : (MP.players[bot.targetId]?.z ?? player.z);
     const dx = bot.x - targetX, dz = bot.z - targetZ;
@@ -412,7 +427,7 @@ function hostUpdateBots(dt) {
 }
 
 function hostProcessAttack(clientId, stage) {
-  const attacker = MP.players[clientId]; if (!attacker) return;
+  const attacker = MP.players[clientId]; if (!attacker || attacker.dead) return;
   const dmg = stage === 1 ? 15 : stage === 2 ? 20 : 30;
   if (gameMode === 'pvp') {
     // PVP：攻击其他玩家
@@ -614,13 +629,21 @@ function clientApplyState(state) {
     if (blackpig.mesh) {
       blackpig.mesh.position.set(blackpig.x, 6, blackpig.z);
       if (blackpig.isWatching !== wasWatching) {
-        // 朝向变化时更新材质，纹理没加载完就用颜色区分
+        // 朝向变化时更新材质，纹理已加载则用纹理并重置颜色，未加载则用颜色临时区分
         if (blackpig.isWatching) {
-          if (blackpig.frontTex) blackpig.mesh.material.map = blackpig.frontTex;
-          blackpig.mesh.material.color.setHex(0xff4444);
+          if (blackpig.frontTex) {
+            blackpig.mesh.material.map = blackpig.frontTex;
+            blackpig.mesh.material.color.setHex(0xffffff);
+          } else {
+            blackpig.mesh.material.color.setHex(0xff4444);
+          }
         } else {
-          if (blackpig.backTex) blackpig.mesh.material.map = blackpig.backTex;
-          blackpig.mesh.material.color.setHex(0x4444ff);
+          if (blackpig.backTex) {
+            blackpig.mesh.material.map = blackpig.backTex;
+            blackpig.mesh.material.color.setHex(0xffffff);
+          } else {
+            blackpig.mesh.material.color.setHex(0x4444ff);
+          }
         }
         blackpig.mesh.material.needsUpdate = true;
       }
@@ -648,6 +671,7 @@ function clientUpdateRemotePlayers(dt) {
 }
 function clientSendInput() {
   if (MP.mode !== 'client' || !MP.connected || !MP.gameStarted) return;
+  if (MP._clientDead) return;
   const now = Date.now();
   if (now - MP.lastInputSend < 80) return;
   MP.lastInputSend = now;
@@ -658,6 +682,7 @@ function clientSendInput() {
 }
 function clientSendAttack(stage) {
   if (MP.mode !== 'client' || !MP.connected) return;
+  if (MP._clientDead) return;
   Bridge.send(JSON.stringify({type:'attack', stage}));
 }
 function showDeathOverlay() {
