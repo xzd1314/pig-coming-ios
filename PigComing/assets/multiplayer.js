@@ -223,6 +223,7 @@ function handleHostMessage(clientId, msg) {
         x:2*CELL+(Math.random()-0.5)*2, z:5*CELL+(Math.random()-0.5)*2,
         yaw:0, pitch:0, health:MP.MAX_HEALTH, alive:true, dead:false,
         respawnTimer:0, invincible:0, mesh:null,
+        isSitting:false, standUpCooldown:0,
         input:{dx:0,dy:0,yaw:0,pitch:0,sprint:false,jump:false},
       };
       Bridge.sendTo(clientId, JSON.stringify({
@@ -285,10 +286,11 @@ function buildState() {
     id:'host', name:MP.myName, color:0,
     x:player.x, z:player.z, yaw:player.yaw, pitch:player.pitch,
     alive:!MP._hostDead, health:MP._hostHealth, dead:MP._hostDead,
+    isSitting: (typeof deskChair !== 'undefined') ? !!deskChair.isSitting : false,
   }];
   for (const id in MP.players) {
     const p = MP.players[id];
-    players.push({id, name:p.name, color:p.color, x:p.x, z:p.z, yaw:p.yaw, pitch:p.pitch, alive:p.alive, health:p.health, dead:p.dead});
+    players.push({id, name:p.name, color:p.color, x:p.x, z:p.z, yaw:p.yaw, pitch:p.pitch, alive:p.alive, health:p.health, dead:p.dead, isSitting:!!p.isSitting});
   }
   const bots = [{x:nextbot.x, z:nextbot.z, alive:nextbot.alive, health:nextbot.health, targetId:'host'}];
   for (const bot of MP.extraBots) bots.push({x:bot.x, z:bot.z, alive:bot.alive, health:bot.health, targetId:bot.targetId, colorIdx:bot.colorIdx});
@@ -333,36 +335,61 @@ function hostUpdateRemotePlayers(dt) {
       if (p.respawnTimer <= 0) {
         const sp = findSafeSpawn(); p.x=sp.x; p.z=sp.z;
         p.health=MP.MAX_HEALTH; p.dead=false; p.alive=true; p.invincible=MP.INVINCIBLE_TIME;
+        p.isSitting = false; p.standUpCooldown = 0;
         if (p.mesh) { setPlayerDead(p.mesh, false); p.mesh.visible = true; }
       }
       continue;
     }
     if (p.invincible > 0) p.invincible -= dt;
+    if (p.standUpCooldown > 0) p.standUpCooldown -= dt;
     if (MP.gameStarted) {
       const input = p.input;
-      // 黑猪模式：黑猪看着时移动=被罚（只罚这个玩家）
+      // 黑猪模式：黑猪看着时移动或坐着=被罚（只罚这个玩家）
       if (gameMode === 'blackpig' && blackpig.isWatching && !blackpig.isTurning) {
-        if (Math.abs(input.dx) > 0.01 || Math.abs(input.dy) > 0.01) {
+        if (Math.abs(input.dx) > 0.01 || Math.abs(input.dy) > 0.01 || p.isSitting) {
           hostDamagePlayer(id);
         }
         p.yaw = input.yaw; p.pitch = input.pitch;
         continue;
       }
-      const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
-      const fwd = {x:-Math.sin(input.yaw), z:-Math.cos(input.yaw)};
-      const right = {x:Math.cos(input.yaw), z:-Math.sin(input.yaw)};
-      const mx = (fwd.x*input.dy + right.x*input.dx)*speed*dt;
-      const mz = (fwd.z*input.dy + right.z*input.dx)*speed*dt;
-      if (gameMode === 'pvp' || gameMode === 'blackpig') {
-        p.x += mx; p.z += mz;
-        const half = 30;
-        p.x = Math.max(-half, Math.min(half, p.x));
-        p.z = Math.max(-half, Math.min(half, p.z));
+      // 坐着时不移动
+      if (gameMode === 'blackpig' && p.isSitting) {
+        // 处理站起请求
+        if (input.standUp) {
+          p.isSitting = false;
+          p.standUpCooldown = 1.0;
+          // 往面朝方向移动3米
+          const fwdX = -Math.sin(input.yaw);
+          const fwdZ = -Math.cos(input.yaw);
+          p.x += fwdX * 3;
+          p.z += fwdZ * 3;
+        }
+        p.yaw = input.yaw; p.pitch = input.pitch;
       } else {
-        const nx = p.x+mx; if (!collides(nx,p.z,PLAYER_RADIUS) || settings.noclip) p.x = nx;
-        const nz = p.z+mz; if (!collides(p.x,nz,PLAYER_RADIUS) || settings.noclip) p.z = nz;
+        const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
+        const fwd = {x:-Math.sin(input.yaw), z:-Math.cos(input.yaw)};
+        const right = {x:Math.cos(input.yaw), z:-Math.sin(input.yaw)};
+        const mx = (fwd.x*input.dy + right.x*input.dx)*speed*dt;
+        const mz = (fwd.z*input.dy + right.z*input.dx)*speed*dt;
+        if (gameMode === 'pvp' || gameMode === 'blackpig') {
+          p.x += mx; p.z += mz;
+          const half = 30;
+          p.x = Math.max(-half, Math.min(half, p.x));
+          p.z = Math.max(-half, Math.min(half, p.z));
+        } else {
+          const nx = p.x+mx; if (!collides(nx,p.z,PLAYER_RADIUS) || settings.noclip) p.x = nx;
+          const nz = p.z+mz; if (!collides(p.x,nz,PLAYER_RADIUS) || settings.noclip) p.z = nz;
+        }
+        p.yaw = input.yaw; p.pitch = input.pitch;
       }
-      p.yaw = input.yaw; p.pitch = input.pitch;
+      // 黑猪模式：课桌椅坐下检测
+      if (gameMode === 'blackpig' && !p.isSitting && p.standUpCooldown <= 0) {
+        const ddx = p.x - deskChair.x, ddz = p.z - deskChair.z;
+        if (Math.sqrt(ddx*ddx + ddz*ddz) < 1.5) {
+          p.isSitting = true;
+          p.x = deskChair.x; p.z = deskChair.z + 1.2;
+        }
+      }
     }
     if (!p.mesh && scene) { p.mesh = createPlayerMesh(p.color, p.name); if (p.mesh) scene.add(p.mesh); }
     if (p.mesh) updateRemotePlayer(p);
@@ -422,6 +449,17 @@ function hostUpdateBots(dt) {
     if (Math.sqrt(dx*dx+dz*dz) < NEXTBOT_SIZE*0.55+PLAYER_RADIUS) {
       if (bot.targetId === 'host') hostOnHostHit();
       else if (MP.players[bot.targetId]) hostDamagePlayer(bot.targetId);
+    }
+  }
+  // 主猪nextbot对客户端玩家的碰撞检测（主机碰撞已在updateNormalGame中处理）
+  if (nextbot.alive) {
+    for (const id in MP.players) {
+      const p = MP.players[id];
+      if (p.dead) continue;
+      const dx = nextbot.x - p.x, dz = nextbot.z - p.z;
+      if (Math.sqrt(dx*dx+dz*dz) < NEXTBOT_SIZE*0.55+PLAYER_RADIUS) {
+        hostDamagePlayer(id);
+      }
     }
   }
 }
@@ -490,14 +528,17 @@ function hostDamagePlayer(clientId) {
 }
 function hostUpdateHostHealth(dt) {
   if (MP._hostDead) {
+    if (!MP._hostDeathOverlayShown) { MP._hostDeathOverlayShown = true; showDeathOverlay(); }
     MP._hostRespawnTimer -= dt;
     if (MP._hostRespawnTimer <= 0) {
       const sp = findSafeSpawn(); player.x=sp.x; player.z=sp.z;
       MP._hostHealth=MP.MAX_HEALTH; MP._hostDead=false; MP._hostInvincible=MP.INVINCIBLE_TIME;
+      MP._hostDeathOverlayShown = false; hideDeathOverlay();
       playerHealth = MP.MAX_HEALTH; if (typeof updateHealthUI === 'function') updateHealthUI();
     }
     return;
   }
+  if (MP._hostDeathOverlayShown) { MP._hostDeathOverlayShown = false; hideDeathOverlay(); }
   if (MP._hostInvincible > 0) MP._hostInvincible -= dt;
 }
 function hostOnHostHit() {
@@ -570,6 +611,7 @@ function clientApplyState(state) {
   if (state.bots && state.bots.length > 0) {
     const mainBot = state.bots[0];
     nextbot.x = mainBot.x; nextbot.z = mainBot.z; nextbot.alive = mainBot.alive; nextbot.health = mainBot.health;
+    if (typeof updateHealthUI === 'function') updateHealthUI();
     if (nextbot.mesh) {
       nextbot.mesh.visible = nextbot.alive;
       nextbot.mesh.position.set(nextbot.x, NEXTBOT_SIZE/2+0.15, nextbot.z);
@@ -601,6 +643,10 @@ function clientApplyState(state) {
     if (pdata.id === MP.myId) {
       player.x = pdata.x; player.z = pdata.z; player.yaw = pdata.yaw; player.pitch = pdata.pitch;
       playerHealth = pdata.health; if (typeof updateHealthUI === 'function') updateHealthUI();
+      // 同步坐下状态（黑猪模式）
+      if (typeof deskChair !== 'undefined' && gameMode === 'blackpig') {
+        deskChair.isSitting = !!pdata.isSitting;
+      }
       if (pdata.dead && !MP._clientDead) { MP._clientDead = true; showDeathOverlay(); }
       else if (!pdata.dead && MP._clientDead) { MP._clientDead = false; hideDeathOverlay(); }
       continue;
@@ -646,6 +692,20 @@ function clientApplyState(state) {
           }
         }
         blackpig.mesh.material.needsUpdate = true;
+        // 客户端本地播放换面音效和对应音乐
+        if (typeof bpStopAll === 'function' && typeof bpPlayQueue === 'function') {
+          bpStopAll();
+          const targetWatching = blackpig.isWatching;
+          bpAudioQueue.push({audio:sfxBpTurn, duration:1.5, callback:()=>{
+            if (targetWatching) {
+              bpAudioQueue.push({audio:sfxBpBack, duration:8});
+            } else {
+              bpAudioQueue.push({audio:sfxBpFront, duration:8});
+            }
+            bpPlayQueue();
+          }});
+          bpPlayQueue();
+        }
       }
     }
     if (typeof updateBlackpigStatusUI === 'function') updateBlackpigStatusUI();
@@ -675,9 +735,11 @@ function clientSendInput() {
   const now = Date.now();
   if (now - MP.lastInputSend < 80) return;
   MP.lastInputSend = now;
+  const standUp = !!MP._clientStandRequest;
+  MP._clientStandRequest = false;
   Bridge.send(JSON.stringify({type:'input', input:{
     dx:joystick.dx, dy:joystick.dy, yaw:player.yaw, pitch:player.pitch,
-    sprint:sprintActive, jump:!player.onGround,
+    sprint:sprintActive, jump:!player.onGround, standUp:standUp,
   }}));
 }
 function clientSendAttack(stage) {
