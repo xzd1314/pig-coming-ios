@@ -65,7 +65,14 @@ window.NativeCallback = {
   onServerStopped() { MP.serverRunning = false; MP.mode = 'offline'; cleanupMultiplayer(); },
   onClientConnected(clientId) { console.log('[MP] client connected:', clientId); },
   onClientDisconnected(clientId) {
-    if (MP.players[clientId]) { removePlayerMesh(MP.players[clientId]); delete MP.players[clientId]; broadcastPlayerList(); }
+    if (MP.players[clientId]) {
+      const p = MP.players[clientId];
+      if (p._chairIdx !== undefined && typeof deskChairs !== 'undefined' && deskChairs[p._chairIdx]) {
+        const ch = deskChairs[p._chairIdx];
+        if (ch.occupiedBy === clientId) { ch.occupiedBy = null; ch.isSitting = false; }
+      }
+      removePlayerMesh(p); delete MP.players[clientId]; broadcastPlayerList(); if (MP.onPlayerLeave) MP.onPlayerLeave(clientId);
+    }
   },
   onMessage(clientId, msgStr) {
     try { handleHostMessage(clientId, JSON.parse(msgStr)); } catch(e) { console.error('[MP] parse:', e); }
@@ -173,8 +180,18 @@ function removePlayerMesh(player) {
 function updateRemotePlayer(player) {
   if (!player || !player.mesh) return;
   try {
+    // 插值平滑移动（lerp factor 0.15，平衡响应速度和平滑度）
+    const lerpFactor = 0.15;
+    if (player.targetX !== undefined) {
+      player.x += (player.targetX - player.x) * lerpFactor;
+      player.z += (player.targetZ - player.z) * lerpFactor;
+      // yaw插值，处理角度环绕
+      let dyaw = (player.targetYaw || 0) - player.yaw;
+      while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      player.yaw += dyaw * lerpFactor;
+    }
     player.mesh.position.set(player.x, 0, player.z);
-    // 朝向：根据yaw旋转（不面向相机）
     player.mesh.rotation.y = player.yaw || 0;
     // label始终面向相机
     if (player.mesh.userData.label) {
@@ -208,7 +225,7 @@ function hostBroadcastRoom() {
   Bridge.startBroadcast({
     type:'room', host:MP.myName, port:MP.roomPort,
     players:Object.keys(MP.players).length+1, maxPlayers:MP.MAX_PLAYERS,
-    mode:gameMode, inGame:gameRunning,
+    mode:MP.selectedMode, inGame:gameRunning,
   });
 }
 function handleHostMessage(clientId, msg) {
@@ -223,22 +240,24 @@ function handleHostMessage(clientId, msg) {
         x:2*CELL+(Math.random()-0.5)*2, z:5*CELL+(Math.random()-0.5)*2,
         yaw:0, pitch:0, health:MP.MAX_HEALTH, alive:true, dead:false,
         respawnTimer:0, invincible:0, mesh:null,
-        isSitting:false, standUpCooldown:0,
         input:{dx:0,dy:0,yaw:0,pitch:0,sprint:false,jump:false},
       };
       Bridge.sendTo(clientId, JSON.stringify({
-        type:'welcome', id:clientId, color:colorIdx, mode:gameMode, hostName:MP.myName,
+        type:'welcome', id:clientId, color:colorIdx, mode:MP.selectedMode, hostName:MP.myName,
         gameRunning:gameRunning,
+        srtPlayerId: window._srtSelectedSrt || null,
         settings: { pigSpeed:settings.pigSpeed, noAI:settings.noAI, dayMode:settings.dayMode, gasMode:settings.gasMode },
       }));
       broadcastPlayerList();
       // 客户端加入直接开局（如果游戏在运行）
       if (gameRunning) {
         MP.gameStarted = true; MP.selectedMode = gameMode;
-        // welcome消息已带gameRunning，客户端会通过welcome分支开始游戏，不再单独发startGame避免重复
+        Bridge.sendTo(clientId, JSON.stringify({type:'startGame', mode:gameMode}));
         sendFullState(clientId);
         syncSettingsTo(clientId);
       }
+      // 通知UI有新玩家加入（SRT大厅等界面依赖此回调刷新）
+      if (MP.onPlayerJoin) MP.onPlayerJoin(clientId);
       break;
     }
     case 'input': {
@@ -253,8 +272,23 @@ function handleHostMessage(clientId, msg) {
       if (MP.gameStarted && MP.players[clientId]) hostProcessAttack(clientId, msg.stage || 1);
       break;
     }
+    case 'srtReady': {
+      if (MP.gameStarted && gameMode === 'srt' && window._srtSelectedSrt === clientId) {
+        srt.state = 'running';
+        if (!srtAudio) srtAudio = new Audio('./srt_audio.mp3');
+        srtAudio.loop = true; srtAudio.volume = 0.8; srtAudio.play().catch(()=>{});
+      }
+      break;
+    }
     case 'leave': {
-      if (MP.players[clientId]) { removePlayerMesh(MP.players[clientId]); delete MP.players[clientId]; broadcastPlayerList(); }
+      if (MP.players[clientId]) {
+        const p = MP.players[clientId];
+        if (p._chairIdx !== undefined && typeof deskChairs !== 'undefined' && deskChairs[p._chairIdx]) {
+          const ch = deskChairs[p._chairIdx];
+          if (ch.occupiedBy === clientId) { ch.occupiedBy = null; ch.isSitting = false; }
+        }
+        removePlayerMesh(p); delete MP.players[clientId]; broadcastPlayerList(); if (MP.onPlayerLeave) MP.onPlayerLeave(clientId);
+      }
       break;
     }
   }
@@ -285,35 +319,46 @@ function buildState() {
   const players = [{
     id:'host', name:MP.myName, color:0,
     x:player.x, z:player.z, yaw:player.yaw, pitch:player.pitch,
-    alive:!MP._hostDead, health:MP._hostHealth, dead:MP._hostDead,
-    isSitting: (typeof deskChair !== 'undefined') ? !!deskChair.isSitting : false,
+    alive:!MP._hostDead, health:MP._hostHealth, dead:MP._hostDead, chairIdx:-1,
   }];
   for (const id in MP.players) {
     const p = MP.players[id];
-    players.push({id, name:p.name, color:p.color, x:p.x, z:p.z, yaw:p.yaw, pitch:p.pitch, alive:p.alive, health:p.health, dead:p.dead, isSitting:!!p.isSitting});
+    players.push({id, name:p.name, color:p.color, x:p.x, z:p.z, yaw:p.yaw, pitch:p.pitch, alive:p.alive, health:p.health, dead:p.dead, chairIdx: (p._chairIdx !== undefined ? p._chairIdx : -1)});
   }
   const bots = [{x:nextbot.x, z:nextbot.z, alive:nextbot.alive, health:nextbot.health, targetId:'host'}];
   for (const bot of MP.extraBots) bots.push({x:bot.x, z:bot.z, alive:bot.alive, health:bot.health, targetId:bot.targetId, colorIdx:bot.colorIdx});
   const bp = (typeof blackpig !== 'undefined') ? {x:blackpig.x||0, z:blackpig.z||-12, isWatching:!!blackpig.isWatching, isTurning:!!blackpig.isTurning} : null;
-  return { time:gameTime, players, bots, gameOver:!gameRunning, mode:gameMode, blackpig:bp };
+  // SRT模式状态同步
+  let srtState = null;
+  if (gameMode === 'srt' && typeof srt !== 'undefined' && srt.mesh) {
+    srtState = {
+      x: srt.x, z: srt.z, health: srt.health, alive: srt.alive,
+      hasFrog: !!srt.hasFrog, state: srt.state,
+      escapeTimer: srt.escapeTimer || 0,
+      frogX: srtFrog.x, frogZ: srtFrog.z, frogCollected: !!srtFrog.collected, frogVisible: srtFrog.mesh ? srtFrog.mesh.visible : false,
+      srtPlayerId: window._srtSelectedSrt || null,
+    };
+  }
+  return { time:gameTime, players, bots, gameOver:!gameRunning, mode:gameMode, blackpig:bp, srt:srtState };
 }
 function hostBroadcastState() { Bridge.broadcast(JSON.stringify({type:'state', ...buildState()})); }
 function findSafeSpawn() {
   if (gameMode === 'pvp' || gameMode === 'blackpig') {
-    // 尝试多次找到不与其他玩家重叠的出生点
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const sp = {x:(Math.random()-0.5)*20, z:10+(Math.random()-0.5)*10};
-      let tooClose = false;
-      // 检查与主机的距离
-      if (Math.sqrt((sp.x-player.x)**2 + (sp.z-player.z)**2) < 3) tooClose = true;
-      // 检查与其他玩家的距离
-      for (const id in MP.players) {
-        const p = MP.players[id];
-        if (p && !p.dead && Math.sqrt((sp.x-p.x)**2 + (sp.z-p.z)**2) < 3) { tooClose = true; break; }
-      }
-      if (!tooClose) return sp;
-    }
     return {x:(Math.random()-0.5)*20, z:10+(Math.random()-0.5)*10};
+  }
+  if (gameMode === 'srt') {
+    // SRT场地内随机出生，避开SRT和青蛙
+    const half = (typeof SRT_FIELD_SIZE !== 'undefined' ? SRT_FIELD_SIZE : 60)/2 - 4;
+    let sx, sz, tries = 0;
+    do {
+      sx = (Math.random()-0.5)*half*1.6;
+      sz = (Math.random()-0.5)*half*1.6;
+      tries++;
+      const dSrt = Math.sqrt((sx-srt.x)**2+(sz-srt.z)**2);
+      const dFrog = Math.sqrt((sx-srtFrog.x)**2+(sz-srtFrog.z)**2);
+      if (dSrt > 8 && dFrog > 5) break;
+    } while (tries < 20);
+    return {x:sx, z:sz};
   }
   const candidates = [];
   for (let r = 1; r < MAP_ROWS-1; r++) for (let c = 1; c < MAP_COLS-1; c++) {
@@ -334,62 +379,104 @@ function hostUpdateRemotePlayers(dt) {
       p.respawnTimer -= dt;
       if (p.respawnTimer <= 0) {
         const sp = findSafeSpawn(); p.x=sp.x; p.z=sp.z;
-        p.health=MP.MAX_HEALTH; p.dead=false; p.alive=true; p.invincible=MP.INVINCIBLE_TIME;
-        p.isSitting = false; p.standUpCooldown = 0;
+        p.dead=false; p.alive=true; p.health=MP.MAX_HEALTH; p.invincible=MP.INVINCIBLE_TIME;
         if (p.mesh) { setPlayerDead(p.mesh, false); p.mesh.visible = true; }
+        // 客户端复活后重置所有猪路径，让猪直接重新追
+        if (gameMode === 'normal' || gameMode === 'hunt') {
+          nextbot.path = []; nextbot.pathTimer = 0;
+          for (const bot of MP.extraBots) { bot.path = []; bot.pathTimer = 0; }
+          if (typeof nextbotAudio !== 'undefined' && nextbotAudio) { try { nextbotAudio.currentTime = 0; nextbotAudio.play().catch(()=>{}); } catch(e){} }
+        }
       }
       continue;
     }
     if (p.invincible > 0) p.invincible -= dt;
-    if (p.standUpCooldown > 0) p.standUpCooldown -= dt;
     if (MP.gameStarted) {
       const input = p.input;
-      // 黑猪模式：黑猪看着时移动或坐着=被罚（只罚这个玩家）
+      // 黑猪模式：椅子占用管理（先于判罚处理，保证坐着的玩家位置正确）
+      if (gameMode === 'blackpig' && typeof deskChairs !== 'undefined') {
+        if (p._chairIdx !== undefined && p._chairIdx !== input.chairIdx) {
+          const oldCh = deskChairs[p._chairIdx];
+          if (oldCh && oldCh.occupiedBy === id) { oldCh.occupiedBy = null; oldCh.isSitting = false; }
+          p._chairIdx = undefined;
+        }
+        if (input.sitting && deskChairs[input.chairIdx]) {
+          const ch = deskChairs[input.chairIdx];
+          if (!ch.occupiedBy || ch.occupiedBy === id) {
+            ch.occupiedBy = id; ch.isSitting = true; p._chairIdx = input.chairIdx;
+            p.x = ch.x; p.z = ch.z + 1.2;
+          }
+          p.yaw = input.yaw; p.pitch = input.pitch;
+          if (p.mesh) updateRemotePlayer(p);
+          continue;
+        }
+      }
+      // 黑猪模式：黑猪看着时移动=被罚，坐着也=被罚（服务端权威：用摇杆输入判定）
       if (gameMode === 'blackpig' && blackpig.isWatching && !blackpig.isTurning) {
-        if (Math.abs(input.dx) > 0.01 || Math.abs(input.dy) > 0.01 || p.isSitting) {
+        if (input.sitting) {
+          hostDamagePlayer(id);
+        } else if (Math.abs(input.dx) > 0.05 || Math.abs(input.dy) > 0.05) {
           hostDamagePlayer(id);
         }
         p.yaw = input.yaw; p.pitch = input.pitch;
+        if (p.mesh) updateRemotePlayer(p);
         continue;
       }
-      // 坐着时不移动
-      if (gameMode === 'blackpig' && p.isSitting) {
-        // 处理站起请求
-        if (input.standUp) {
-          p.isSitting = false;
-          p.standUpCooldown = 1.0;
-          // 往面朝方向移动3米
-          const fwdX = -Math.sin(input.yaw);
-          const fwdZ = -Math.cos(input.yaw);
-          p.x += fwdX * 3;
-          p.z += fwdZ * 3;
-        }
-        p.yaw = input.yaw; p.pitch = input.pitch;
-      } else {
-        const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
+      // SRT模式：被选为SRT的客户端，主机用摇杆输入积分SRT位置（服务端权威）
+      if (gameMode === 'srt' && window._srtSelectedSrt === id) {
+        if (!srt.alive) { p.yaw = input.yaw; p.pitch = input.pitch; if (p.mesh) updateRemotePlayer(p); continue; }
+        const srtSpeed = (input.sprint ? 7.0 : 4.5) * (settings.pigSpeed || 1);
         const fwd = {x:-Math.sin(input.yaw), z:-Math.cos(input.yaw)};
         const right = {x:Math.cos(input.yaw), z:-Math.sin(input.yaw)};
-        const mx = (fwd.x*input.dy + right.x*input.dx)*speed*dt;
-        const mz = (fwd.z*input.dy + right.z*input.dx)*speed*dt;
-        if (gameMode === 'pvp' || gameMode === 'blackpig') {
-          p.x += mx; p.z += mz;
-          const half = 30;
-          p.x = Math.max(-half, Math.min(half, p.x));
-          p.z = Math.max(-half, Math.min(half, p.z));
-        } else {
-          const nx = p.x+mx; if (!collides(nx,p.z,PLAYER_RADIUS) || settings.noclip) p.x = nx;
-          const nz = p.z+mz; if (!collides(p.x,nz,PLAYER_RADIUS) || settings.noclip) p.z = nz;
+        srt.x += (fwd.x*input.dy + right.x*input.dx)*srtSpeed*dt;
+        srt.z += (fwd.z*input.dy + right.z*input.dx)*srtSpeed*dt;
+        const shalf = SRT_FIELD_SIZE/2 - 2;
+        srt.x = Math.max(-shalf, Math.min(shalf, srt.x));
+        srt.z = Math.max(-shalf, Math.min(shalf, srt.z));
+        if (srt.mesh) { srt.mesh.position.set(srt.x, 2, srt.z); srt.mesh.lookAt(player.x, 2, player.z); }
+        if (srt.hasFrog && srtFrog.mesh) {
+          srtFrog.mesh.position.set(srt.x, 0.8, srt.z+1);
+          srtFrog.mesh.lookAt(player.x, 0.8, player.z);
         }
-        p.yaw = input.yaw; p.pitch = input.pitch;
-      }
-      // 黑猪模式：课桌椅坐下检测
-      if (gameMode === 'blackpig' && !p.isSitting && p.standUpCooldown <= 0) {
-        const ddx = p.x - deskChair.x, ddz = p.z - deskChair.z;
-        if (Math.sqrt(ddx*ddx + ddz*ddz) < 1.5) {
-          p.isSitting = true;
-          p.x = deskChair.x; p.z = deskChair.z + 1.2;
+        if (!srt.hasFrog && !srtFrog.collected) {
+          const fdx = srtFrog.x - srt.x, fdz = srtFrog.z - srt.z;
+          if (Math.sqrt(fdx*fdx+fdz*fdz) < 2.0) {
+            srt.hasFrog = true; srtFrog.collected = true; srt.escapeTimer = 0;
+            if (srtFrog.mesh) srtFrog.mesh.visible = true;
+            if (!srtAudio) srtAudio = new Audio('./srt_audio.mp3');
+            srtAudio.loop = true; srtAudio.volume = 0.8; srtAudio.play().catch(()=>{});
+            Bridge.broadcast(JSON.stringify({type:'srtEvent', event:'frogTaken'}));
+          }
         }
+        p.x = srt.x; p.z = srt.z; p.yaw = input.yaw; p.pitch = input.pitch;
+        if (p.mesh) p.mesh.visible = false;
+        continue;
       }
+      // 普通玩家：主机用摇杆输入积分位置（服务端权威）
+      const speed = input.sprint ? SPRINT_SPEED : PLAYER_SPEED;
+      const fwd = {x:-Math.sin(input.yaw), z:-Math.cos(input.yaw)};
+      const right = {x:Math.cos(input.yaw), z:-Math.sin(input.yaw)};
+      const mx = (fwd.x*input.dy + right.x*input.dx)*speed*dt;
+      const mz = (fwd.z*input.dy + right.z*input.dx)*speed*dt;
+      if (gameMode === 'pvp' || gameMode === 'blackpig') {
+        p.x += mx; p.z += mz;
+        const half = (gameMode === 'blackpig' && typeof blackpigFieldSize !== 'undefined') ? blackpigFieldSize/2 - 2 : 30;
+        p.x = Math.max(-half, Math.min(half, p.x));
+        p.z = Math.max(-half+8, Math.min(half, p.z));
+      } else if (gameMode === 'srt') {
+        p.x += mx; p.z += mz;
+        const shalf = SRT_FIELD_SIZE/2 - 1;
+        p.x = Math.max(-shalf, Math.min(shalf, p.x));
+        p.z = Math.max(-shalf, Math.min(shalf, p.z));
+      } else {
+        const nx = p.x+mx; if (!collides(nx,p.z,PLAYER_RADIUS) || settings.noclip) p.x = nx;
+        const nz = p.z+mz; if (!collides(p.x,nz,PLAYER_RADIUS) || settings.noclip) p.z = nz;
+      }
+      p.yaw = input.yaw; p.pitch = input.pitch;
+    }
+    // SRT模式下SRT玩家的mesh隐藏
+    if (gameMode === 'srt' && p.mesh) {
+      p.mesh.visible = (window._srtSelectedSrt !== id) && !p.dead;
     }
     if (!p.mesh && scene) { p.mesh = createPlayerMesh(p.color, p.name); if (p.mesh) scene.add(p.mesh); }
     if (p.mesh) updateRemotePlayer(p);
@@ -406,14 +493,37 @@ function hostUpdateBots(dt) {
     else break;
   }
   const playerIds = ['host', ...Object.keys(MP.players)];
+  // 房主的nextbot追房主
+  nextbot.targetId = 'host';
+  // extraBots按顺序追对应玩家（第i只extraBot追第i+1个玩家）
   MP.extraBots.forEach((bot, i) => { bot.targetId = playerIds[(i+1) % playerIds.length]; });
+  // 房主的nextbot重生
+  if (!nextbot.alive) {
+    if (nextbot.respawnTimer === undefined) nextbot.respawnTimer = 3;
+    nextbot.respawnTimer -= dt;
+    if (nextbot.respawnTimer <= 0) {
+      nextbot.alive = true; nextbot.health = 100;
+      const rp = (typeof findPigRespawnPoint === 'function') ? findPigRespawnPoint() : {x:14*CELL, z:1*CELL};
+      nextbot.x = rp.x; nextbot.z = rp.z;
+      nextbot.respawnTimer = undefined;
+      nextbot.path = []; nextbot.pathTimer = 0;
+      if (nextbot.mesh) nextbot.mesh.visible = true;
+      if (nextbot.glowMesh) nextbot.glowMesh.visible = true;
+      if (typeof updateHealthUI === 'function') updateHealthUI();
+    }
+  }
   for (const bot of MP.extraBots) {
     if (!bot.alive) {
+      if (bot.respawnTimer === undefined) bot.respawnTimer = 3;
       bot.respawnTimer -= dt;
       if (bot.respawnTimer <= 0) {
         bot.alive = true; bot.health = 100;
-        bot.x = 14*CELL+(Math.random()-0.5)*4; bot.z = 1*CELL+(Math.random()-0.5)*4;
-        bot.mesh.visible = true; bot.glowMesh.visible = true;
+        const rp = (typeof findPigRespawnPoint === 'function') ? findPigRespawnPoint() : {x:14*CELL, z:1*CELL};
+        bot.x = rp.x; bot.z = rp.z;
+        bot.respawnTimer = undefined;
+        bot.path = []; bot.pathTimer = 0;
+        if (bot.mesh) bot.mesh.visible = true;
+        if (bot.glowMesh) bot.glowMesh.visible = true;
       }
       continue;
     }
@@ -433,16 +543,22 @@ function hostUpdateBots(dt) {
         const np = bot.path[1]; const wp = gridToWorld(np.c, np.r);
         mx = wp.x; mz = wp.z;
         if (Math.sqrt((bot.x-wp.x)**2+(bot.z-wp.z)**2) < 0.8) bot.path.shift();
-      } else { mx = bot.x; mz = bot.z; }
+      } else {
+        // 寻路失败兜底：直接朝目标移动
+        mx = tx; mz = tz;
+      }
       const ndx = mx-bot.x, ndz = mz-bot.z, nd = Math.sqrt(ndx*ndx+ndz*ndz);
       if (nd > 0.1) {
         const mvx = (ndx/nd)*nextbotSpeed*dt;
         const mvz = (ndz/nd)*nextbotSpeed*dt;
-        moveWithCollision(bot, mvx, mvz, NEXTBOT_SIZE*0.35, false);
+        if (typeof moveWithCollision === 'function') moveWithCollision(bot, mvx, mvz, NEXTBOT_SIZE*0.35, false);
+        else { bot.x += mvx; bot.z += mvz; }
       }
     }
     bot.mesh.position.set(bot.x, NEXTBOT_SIZE/2+0.15, bot.z);
+    bot.mesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
     bot.glowMesh.position.copy(bot.mesh.position);
+    bot.glowMesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
     const targetX = bot.targetId === 'host' ? player.x : (MP.players[bot.targetId]?.x ?? player.x);
     const targetZ = bot.targetId === 'host' ? player.z : (MP.players[bot.targetId]?.z ?? player.z);
     const dx = bot.x - targetX, dz = bot.z - targetZ;
@@ -451,21 +567,11 @@ function hostUpdateBots(dt) {
       else if (MP.players[bot.targetId]) hostDamagePlayer(bot.targetId);
     }
   }
-  // 主猪nextbot对客户端玩家的碰撞检测（主机碰撞已在updateNormalGame中处理）
-  if (nextbot.alive) {
-    for (const id in MP.players) {
-      const p = MP.players[id];
-      if (p.dead) continue;
-      const dx = nextbot.x - p.x, dz = nextbot.z - p.z;
-      if (Math.sqrt(dx*dx+dz*dz) < NEXTBOT_SIZE*0.55+PLAYER_RADIUS) {
-        hostDamagePlayer(id);
-      }
-    }
-  }
 }
 
 function hostProcessAttack(clientId, stage) {
-  const attacker = MP.players[clientId]; if (!attacker || attacker.dead) return;
+  const attacker = MP.players[clientId]; if (!attacker) return;
+  if (attacker.dead) return; // 死人不能攻击
   const dmg = stage === 1 ? 15 : stage === 2 ? 20 : 30;
   if (gameMode === 'pvp') {
     // PVP：攻击其他玩家
@@ -476,48 +582,77 @@ function hostProcessAttack(clientId, stage) {
       const p = MP.players[id];
       if (p && !p.dead) targets.push({id, x:p.x, z:p.z, obj:p, isHost:false});
     }
+    let hitSomething = false;
     for (const t of targets) {
       const dx = t.x - attacker.x, dz = t.z - attacker.z;
       const dist = Math.sqrt(dx*dx+dz*dz);
       if (dist > 3.5) continue;
       const toT = {x:dx/dist, z:dz/dist};
       if (fwd.x*toT.x + fwd.z*toT.z < 0.4) continue;
+      hitSomething = true;
       if (t.isHost) {
-        if (hostOnHostHit()) {}
+        if (hostOnHostHit()) {
+          Bridge.sendTo(clientId, JSON.stringify({type:'killConfirm', kills:1}));
+        }
       } else if (t.obj && t.obj.invincible <= 0) {
         t.obj.health -= dmg; t.obj.invincible = 0.5;
         if (t.obj.health <= 0) {
           t.obj.health = 0; t.obj.dead = true; t.obj.alive = false;
           t.obj.respawnTimer = MP.RESPAWN_TIME;
           if (t.obj.mesh) setPlayerDead(t.obj.mesh, true);
+          Bridge.sendTo(clientId, JSON.stringify({type:'killConfirm', kills:1}));
+          Bridge.broadcast(JSON.stringify({type:'pvpKill', killer:clientId, victim:t.id, killerName:attacker.name, victimName:t.obj.name}));
         }
       }
     }
+    if (hitSomething) Bridge.sendTo(clientId, JSON.stringify({type:'attackHit'}));
+    return;
+  }
+  if (gameMode === 'srt') {
+    // SRT：攻击SRT实体
+    if (!srt.alive || !srt.hasFrog) return;
+    const dx = srt.x - attacker.x, dz = srt.z - attacker.z;
+    const dist = Math.sqrt(dx*dx+dz*dz);
+    if (dist > 5) return;
+    const fwd = {x:-Math.sin(attacker.yaw), z:-Math.cos(attacker.yaw)};
+    const toS = {x:dx/dist, z:dz/dist};
+    if (fwd.x*toS.x + fwd.z*toS.z < 0.3) return;
+    srtTakeDamage(dmg);
+    Bridge.broadcast(JSON.stringify({type:'srtHit', damage:dmg, health:srt.health}));
     return;
   }
   if (gameMode !== 'hunt') return;
   const allBots = [nextbot, ...MP.extraBots];
+  let hitAny = false;
   for (const bot of allBots) {
     if (!bot.alive) continue;
     const dx = bot.x - attacker.x, dz = bot.z - attacker.z;
     const dist = Math.sqrt(dx*dx+dz*dz);
-    if (dist > 4) continue;
+    if (dist > 5.5) continue; // 放宽距离补偿网络延迟
     const fwd = {x:-Math.sin(attacker.yaw), z:-Math.cos(attacker.yaw)};
     const toBot = {x:dx/dist, z:dz/dist};
-    if (fwd.x*toBot.x + fwd.z*toBot.z < 0.3) continue;
+    if (fwd.x*toBot.x + fwd.z*toBot.z < 0.15) continue; // 放宽角度
     bot.health -= dmg;
+    hitAny = true;
     if (bot.health <= 0) {
       bot.alive = false; bot.respawnTimer = 3;
       if (bot.mesh) bot.mesh.visible = false;
       if (bot.glowMesh) bot.glowMesh.visible = false;
     }
   }
+  if (hitAny) Bridge.sendTo(clientId, JSON.stringify({type:'attackHit'}));
 }
-function hostDamagePlayer(clientId) {
+function hostDamagePlayer(clientId, instantKill) {
   const p = MP.players[clientId];
   if (!p || p.dead || p.invincible > 0) return;
-  if (gameMode === 'normal' || gameMode === 'blackpig') {
-    // 普通/黑猪模式：一击必杀
+  // 死亡/掉血前释放椅子
+  if (p._chairIdx !== undefined && typeof deskChairs !== 'undefined' && deskChairs[p._chairIdx]) {
+    const ch = deskChairs[p._chairIdx];
+    if (ch.occupiedBy === clientId) { ch.occupiedBy = null; ch.isSitting = false; }
+    p._chairIdx = undefined;
+  }
+  if (gameMode === 'normal' || gameMode === 'blackpig' || instantKill) {
+    // 普通/黑猪/猪碰人：一击必杀
     p.health = 0; p.dead = true; p.alive = false; p.respawnTimer = MP.RESPAWN_TIME;
     if (p.mesh) setPlayerDead(p.mesh, true);
   } else {
@@ -528,17 +663,26 @@ function hostDamagePlayer(clientId) {
 }
 function hostUpdateHostHealth(dt) {
   if (MP._hostDead) {
-    if (!MP._hostDeathOverlayShown) { MP._hostDeathOverlayShown = true; showDeathOverlay(); }
     MP._hostRespawnTimer -= dt;
     if (MP._hostRespawnTimer <= 0) {
       const sp = findSafeSpawn(); player.x=sp.x; player.z=sp.z;
       MP._hostHealth=MP.MAX_HEALTH; MP._hostDead=false; MP._hostInvincible=MP.INVINCIBLE_TIME;
-      MP._hostDeathOverlayShown = false; hideDeathOverlay();
       playerHealth = MP.MAX_HEALTH; if (typeof updateHealthUI === 'function') updateHealthUI();
+      hideHostDeath();
+      // 复活后重置所有猪的路径，让猪直接重新追
+      if (gameMode === 'normal' || gameMode === 'hunt') {
+        nextbot.path = []; nextbot.pathTimer = 0;
+        for (const bot of MP.extraBots) { bot.path = []; bot.pathTimer = 0; }
+        if (typeof nextbotAudio !== 'undefined' && nextbotAudio) { try { nextbotAudio.currentTime = 0; nextbotAudio.play().catch(()=>{}); } catch(e){} }
+      }
+      // 复活时清理椅子占用
+      if (typeof deskChairs !== 'undefined') {
+        for (const c of deskChairs) { if (c.occupiedBy === 'self') { c.occupiedBy = null; c.isSitting = false; } }
+      }
+      if (typeof standUpCooldown !== 'undefined') standUpCooldown = 1.0;
     }
     return;
   }
-  if (MP._hostDeathOverlayShown) { MP._hostDeathOverlayShown = false; hideDeathOverlay(); }
   if (MP._hostInvincible > 0) MP._hostInvincible -= dt;
 }
 function hostOnHostHit() {
@@ -547,13 +691,19 @@ function hostOnHostHit() {
     // 普通/黑猪模式：一击必杀
     MP._hostHealth = 0; MP._hostDead = true; MP._hostRespawnTimer = MP.RESPAWN_TIME;
     playerHealth = 0; if (typeof updateHealthUI === 'function') updateHealthUI();
+    // 显示死亡视觉反馈
+    if (typeof showHostDeath === 'function') showHostDeath();
   } else {
     // 打猪/PVP：扣血
     MP._hostHealth -= 15; MP._hostInvincible = 0.8; playerHealth = MP._hostHealth;
     if (typeof updateHealthUI === 'function') updateHealthUI();
+    // 受伤闪红
+    const flash = document.getElementById('hitFlash');
+    if (flash) { flash.style.background = 'rgba(255,0,0,0.3)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; flash.style.background = 'rgba(255,255,255,0.3)'; }, 100); }
     if (MP._hostHealth <= 0) {
       MP._hostHealth = 0; MP._hostDead = true; MP._hostRespawnTimer = MP.RESPAWN_TIME;
       playerHealth = 0; if (typeof updateHealthUI === 'function') updateHealthUI();
+      if (typeof showHostDeath === 'function') showHostDeath();
     }
   }
   return true;
@@ -568,6 +718,7 @@ function handleClientMessage(msg) {
   switch(msg.type) {
     case 'welcome': {
       MP.myId = msg.id; MP.myColor = msg.color; MP.selectedMode = msg.mode;
+      if (msg.srtPlayerId) window._srtSelectedSrt = msg.srtPlayerId;
       if (msg.settings) applyRemoteSettings(msg.settings);
       if (MP.onJoined) MP.onJoined(msg);
       // welcome里带了游戏状态，直接进游戏，不等startGame消息
@@ -589,7 +740,68 @@ function handleClientMessage(msg) {
       if (MP.onGameStart) MP.onGameStart(msg.mode);
       break;
     }
+    case 'srtAssign': {
+      window._srtSelectedSrt = msg.srtPlayerId;
+      if (typeof srtIsPlayerSRT !== 'undefined') srtIsPlayerSRT = (msg.srtPlayerId === MP.myId);
+      // 如果已在SRT游戏中，立即更新UI
+      if (gameMode === 'srt' && gameRunning) {
+        const showAtk = !srtIsPlayerSRT;
+        const atkBtn = document.getElementById('attackBtn');
+        const hotbar = document.getElementById('hotbar');
+        if (atkBtn) atkBtn.style.display = showAtk ? 'flex' : 'none';
+        if (hotbar) hotbar.style.display = showAtk ? 'flex' : 'none';
+        if (swordGroup) swordGroup.visible = showAtk;
+        if (srt.mesh) srt.mesh.visible = !srtIsPlayerSRT;
+        if (typeof showSRTStatus === 'function') showSRTStatus(srtIsPlayerSRT ? '你是SRT！逃跑！' : '追杀SRT！');
+      }
+      break;
+    }
     case 'gameOver': { if (gameRunning) gameOver('caught'); break; }
+    case 'srtEvent': {
+      if (msg.event === 'frogTaken') {
+        srt.hasFrog = true; srtFrog.collected = true;
+        if (srtFrog.mesh) srtFrog.mesh.visible = true;
+        if (!srtAudio) srtAudio = new Audio('./srt_audio.mp3');
+        srtAudio.loop = true; srtAudio.volume = 0.8; srtAudio.play().catch(()=>{});
+        if (srtIsPlayerSRT) {
+          // SRT玩家自己：显示OK按钮，等待点击后才开始逃跑
+          srt.state = 'seekingFrog';
+          if (typeof showSRTStatus === 'function') showSRTStatus('你拿到青蛙了！点OK开始');
+          const okBtn = document.getElementById('srtOKBtn');
+          if (okBtn) okBtn.style.display = 'block';
+        } else {
+          // 其他玩家：提示SRT已拿到青蛙，逃跑开始时机由主机state同步
+          if (typeof showSRTStatus === 'function') showSRTStatus('SRT拿到青蛙了！追杀它！');
+          const okBtn = document.getElementById('srtOKBtn');
+          if (okBtn) okBtn.style.display = 'none';
+        }
+      } else if (msg.event === 'win') {
+        if (typeof srtGameOver === 'function') srtGameOver(true);
+      } else if (msg.event === 'lose') {
+        if (typeof srtGameOver === 'function') srtGameOver(false);
+      }
+      break;
+    }
+    case 'srtHit': {
+      srt.health = msg.health;
+      if (typeof updateSRTHealthBar === 'function') updateSRTHealthBar();
+      const flash = document.getElementById('hitFlash');
+      if (flash) { flash.style.opacity = '1'; setTimeout(()=>flash.style.opacity='0', 80); }
+      break;
+    }
+    case 'pvpKill': {
+      if (typeof showToast === 'function') showToast((msg.killerName||'')+' 击杀了 '+(msg.victimName||''), 1500);
+      break;
+    }
+    case 'killConfirm': {
+      window.pvpKills = (window.pvpKills || 0) + (msg.kills || 1);
+      break;
+    }
+    case 'attackHit': {
+      const flash = document.getElementById('hitFlash');
+      if (flash) { flash.style.opacity = '1'; setTimeout(()=>flash.style.opacity='0', 80); }
+      break;
+    }
     case 'error': { if (MP.onError) MP.onError(msg.message); break; }
   }
 }
@@ -610,14 +822,15 @@ function clientApplyState(state) {
   document.getElementById('hud').textContent = formatTime(gameTime);
   if (state.bots && state.bots.length > 0) {
     const mainBot = state.bots[0];
-    nextbot.x = mainBot.x; nextbot.z = mainBot.z; nextbot.alive = mainBot.alive; nextbot.health = mainBot.health;
-    if (typeof updateHealthUI === 'function') updateHealthUI();
+    nextbot.targetX = mainBot.x; nextbot.targetZ = mainBot.z; nextbot.alive = mainBot.alive; nextbot.health = mainBot.health;
+    nextbot.targetId = mainBot.targetId || 'host';
     if (nextbot.mesh) {
       nextbot.mesh.visible = nextbot.alive;
-      nextbot.mesh.position.set(nextbot.x, NEXTBOT_SIZE/2+0.15, nextbot.z);
+      // 猪的位置在animate中插值更新
       nextbot.mesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
     }
     if (nextbot.glowMesh) { nextbot.glowMesh.visible = nextbot.alive; if (nextbot.mesh) nextbot.glowMesh.position.copy(nextbot.mesh.position); }
+    if (typeof updateHealthUI === 'function') updateHealthUI();
     if (gameMode === 'hunt' || gameMode === 'normal') {
       while (MP.extraBots.length < state.bots.length - 1) {
         const idx = MP.extraBots.length + 1;
@@ -627,12 +840,13 @@ function clientApplyState(state) {
       for (let i = 1; i < state.bots.length; i++) {
         const bot = MP.extraBots[i-1]; if (!bot) continue;
         const bd = state.bots[i];
-        bot.x = bd.x; bot.z = bd.z; bot.alive = bd.alive; bot.health = bd.health;
+        bot.alive = bd.alive; bot.health = bd.health;
+        bot.targetId = bd.targetId;
         bot.mesh.visible = bot.alive; bot.glowMesh.visible = bot.alive;
         if (bot.alive) {
-          bot.mesh.position.set(bot.x, NEXTBOT_SIZE/2+0.15, bot.z);
-          bot.mesh.lookAt(camera.position.x, NEXTBOT_SIZE/2+0.15, camera.position.z);
-          bot.glowMesh.position.copy(bot.mesh.position);
+          // 插值而非瞬移
+          if (bot.targetX === undefined) { bot.x = bd.x; bot.z = bd.z; }
+          bot.targetX = bd.x; bot.targetZ = bd.z;
         }
       }
     }
@@ -641,14 +855,31 @@ function clientApplyState(state) {
   for (const pdata of (state.players || [])) {
     seenIds.add(pdata.id);
     if (pdata.id === MP.myId) {
-      player.x = pdata.x; player.z = pdata.z; player.yaw = pdata.yaw; player.pitch = pdata.pitch;
+      // 服务端权威：强制采纳主机位置，不做本地预测
       playerHealth = pdata.health; if (typeof updateHealthUI === 'function') updateHealthUI();
-      // 同步坐下状态（黑猪模式）
-      if (typeof deskChair !== 'undefined' && gameMode === 'blackpig') {
-        deskChair.isSitting = !!pdata.isSitting;
+      if (!pdata.dead) {
+        if (gameMode === 'srt' && typeof srtIsPlayerSRT !== 'undefined' && srtIsPlayerSRT) {
+          if (typeof srt !== 'undefined') { srt.x = pdata.x; srt.z = pdata.z; }
+        } else {
+          player.x = pdata.x; player.z = pdata.z;
+        }
       }
       if (pdata.dead && !MP._clientDead) { MP._clientDead = true; showDeathOverlay(); }
-      else if (!pdata.dead && MP._clientDead) { MP._clientDead = false; hideDeathOverlay(); }
+      else if (!pdata.dead && MP._clientDead) {
+        MP._clientDead = false; hideDeathOverlay();
+        // 复活时传送到主机指定的复活点
+        if (gameMode === 'srt' && typeof srtIsPlayerSRT !== 'undefined' && srtIsPlayerSRT) {
+          if (typeof srt !== 'undefined') { srt.x = pdata.x; srt.z = pdata.z; }
+        } else {
+          player.x = pdata.x; player.z = pdata.z;
+        }
+        player.jumpVel = 0; player.onGround = true; player.jumpY = 0;
+        // 复活时清理椅子占用
+        if (typeof deskChairs !== 'undefined') {
+          for (const c of deskChairs) { if (c.occupiedBy === 'self') { c.occupiedBy = null; c.isSitting = false; } }
+        }
+        if (typeof standUpCooldown !== 'undefined') standUpCooldown = 1.0;
+      }
       continue;
     }
     let rp = MP.remotePlayers[pdata.id];
@@ -661,7 +892,14 @@ function clientApplyState(state) {
     }
     rp.targetX = pdata.x; rp.targetZ = pdata.z; rp.targetYaw = pdata.yaw;
     rp.name = pdata.name; rp.health = pdata.health; rp.dead = pdata.dead;
-    if (rp.mesh) { setPlayerDead(rp.mesh, pdata.dead); updatePlayerLabel(rp.mesh.userData.label, pdata.name, MP.PLAYER_COLORS[pdata.color], pdata.health); }
+    if (rp.mesh) {
+      setPlayerDead(rp.mesh, pdata.dead);
+      // SRT模式下，扮演SRT的玩家其mesh隐藏（SRT实体已代表该玩家）
+      if (gameMode === 'srt' && state.srt && state.srt.srtPlayerId === pdata.id) {
+        rp.mesh.visible = false;
+      }
+      updatePlayerLabel(rp.mesh.userData.label, pdata.name, MP.PLAYER_COLORS[pdata.color], pdata.health);
+    }
   }
   for (const id in MP.remotePlayers) {
     if (!seenIds.has(id)) { if (MP.remotePlayers[id].mesh) scene.remove(MP.remotePlayers[id].mesh); delete MP.remotePlayers[id]; }
@@ -670,45 +908,95 @@ function clientApplyState(state) {
   if (gameMode === 'blackpig' && state.blackpig && typeof blackpig !== 'undefined') {
     blackpig.x = state.blackpig.x; blackpig.z = state.blackpig.z;
     const wasWatching = blackpig.isWatching;
+    const wasTurning = blackpig.isTurning;
     blackpig.isWatching = state.blackpig.isWatching;
     blackpig.isTurning = state.blackpig.isTurning;
     if (blackpig.mesh) {
       blackpig.mesh.position.set(blackpig.x, 6, blackpig.z);
-      if (blackpig.isWatching !== wasWatching) {
-        // 朝向变化时更新材质，纹理已加载则用纹理并重置颜色，未加载则用颜色临时区分
-        if (blackpig.isWatching) {
-          if (blackpig.frontTex) {
-            blackpig.mesh.material.map = blackpig.frontTex;
-            blackpig.mesh.material.color.setHex(0xffffff);
-          } else {
-            blackpig.mesh.material.color.setHex(0xff4444);
-          }
-        } else {
-          if (blackpig.backTex) {
-            blackpig.mesh.material.map = blackpig.backTex;
-            blackpig.mesh.material.color.setHex(0xffffff);
-          } else {
-            blackpig.mesh.material.color.setHex(0x4444ff);
-          }
-        }
-        blackpig.mesh.material.needsUpdate = true;
-        // 客户端本地播放换面音效和对应音乐
-        if (typeof bpStopAll === 'function' && typeof bpPlayQueue === 'function') {
-          bpStopAll();
-          const targetWatching = blackpig.isWatching;
+    }
+    // 换面开始（isTurning false→true）：立即播放换面音效，与主机同步
+    if (!wasTurning && blackpig.isTurning) {
+      if (typeof bpStopAll === 'function' && typeof sfxBpTurn !== 'undefined' && sfxBpTurn) {
+        bpStopAll();
+        if (typeof bpAudioQueue !== 'undefined' && typeof bpPlayQueue === 'function') {
           bpAudioQueue.push({audio:sfxBpTurn, duration:1.5, callback:()=>{
-            if (targetWatching) {
-              bpAudioQueue.push({audio:sfxBpBack, duration:8});
-            } else {
-              bpAudioQueue.push({audio:sfxBpFront, duration:8});
-            }
-            bpPlayQueue();
+            // 换面音效结束后由 isWatching 变化触发音乐播放（等待主机同步最新朝向）
           }});
           bpPlayQueue();
         }
       }
     }
+    // 朝向变化（换面结束）：播放对应音乐，与主机同步
+    if (blackpig.isWatching !== wasWatching && !blackpig.isTurning) {
+      if (typeof bpStopAll === 'function') bpStopAll();
+      if (blackpig.isWatching && typeof sfxBpBack !== 'undefined' && sfxBpBack) {
+        if (typeof bpAudioQueue !== 'undefined' && typeof bpPlayQueue === 'function') {
+          bpAudioQueue.push({audio:sfxBpBack, duration:8}); bpPlayQueue();
+        }
+      } else if (!blackpig.isWatching && typeof sfxBpFront !== 'undefined' && sfxBpFront) {
+        if (typeof bpAudioQueue !== 'undefined' && typeof bpPlayQueue === 'function') {
+          bpAudioQueue.push({audio:sfxBpFront, duration:8}); bpPlayQueue();
+        }
+      }
+    }
+    // 朝向变化：更新材质（音乐由上面换面音效结束后播放，避免重复）
+    if (blackpig.mesh && blackpig.isWatching !== wasWatching) {
+      if (blackpig.isWatching) {
+        if (blackpig.frontTex) blackpig.mesh.material.map = blackpig.frontTex;
+        blackpig.mesh.material.color.setHex(0xff4444);
+      } else {
+        if (blackpig.backTex) blackpig.mesh.material.map = blackpig.backTex;
+        blackpig.mesh.material.color.setHex(0x4444ff);
+      }
+      blackpig.mesh.material.needsUpdate = true;
+    }
     if (typeof updateBlackpigStatusUI === 'function') updateBlackpigStatusUI();
+  }
+  // SRT模式：同步SRT实体和青蛙
+  if (gameMode === 'srt' && state.srt && typeof srt !== 'undefined') {
+    const ss = state.srt;
+    const iAmSrt = (ss.srtPlayerId === MP.myId);
+    window._srtSelectedSrt = ss.srtPlayerId;
+    srtIsPlayerSRT = iAmSrt;
+    // 青蛙位置同步
+    if (srtFrog) {
+      srtFrog.x = ss.frogX; srtFrog.z = ss.frogZ; srtFrog.collected = ss.frogCollected;
+      if (srtFrog.mesh) {
+        srtFrog.mesh.visible = ss.frogVisible;
+        if (!ss.frogCollected) {
+          srtFrog.mesh.position.set(ss.frogX, 0.8, ss.frogZ);
+          srtFrog.mesh.lookAt(camera.position.x, 0.8, camera.position.z);
+        }
+      }
+    }
+    srt.alive = ss.alive; srt.hasFrog = ss.hasFrog; srt.state = ss.state;
+    srt.health = ss.health; srt.escapeTimer = ss.escapeTimer || 0;
+    if (srt.mesh) {
+      srt.mesh.visible = ss.alive;
+      if (iAmSrt) {
+        // 自己是SRT：本地预测，位置由本地控制，不被state覆盖
+        srt.mesh.visible = false; // 第一人称看不到自己的SRT模型
+      } else {
+        // 其他玩家：插值到主机位置
+        if (srt.targetX === undefined) { srt.x = ss.x; srt.z = ss.z; }
+        srt.targetX = ss.x; srt.targetZ = ss.z;
+      }
+    }
+    if (typeof updateSRTHealthBar === 'function') updateSRTHealthBar();
+    if (typeof showSRTStatus === 'function') {
+      if (!ss.alive) showSRTStatus('SRT被击败！');
+      else if (ss.hasFrog && srt.state === 'running') showSRTStatus('SRT拿到青蛙了！追杀它！');
+    }
+  }
+  // 黑猪模式：同步其他玩家占用的椅子
+  if (gameMode === 'blackpig' && typeof deskChairs !== 'undefined' && state.players) {
+    for (const c of deskChairs) { if (c.occupiedBy !== 'self') { c.occupiedBy = null; c.isSitting = false; } }
+    for (const pdata of state.players) {
+      if (pdata.chairIdx !== undefined && pdata.chairIdx >= 0 && pdata.id !== MP.myId && deskChairs[pdata.chairIdx]) {
+        deskChairs[pdata.chairIdx].occupiedBy = pdata.id;
+        deskChairs[pdata.chairIdx].isSitting = true;
+      }
+    }
   }
   if (state.gameOver && gameRunning) gameOver('caught');
 }
@@ -731,20 +1019,23 @@ function clientUpdateRemotePlayers(dt) {
 }
 function clientSendInput() {
   if (MP.mode !== 'client' || !MP.connected || !MP.gameStarted) return;
-  if (MP._clientDead) return;
   const now = Date.now();
-  if (now - MP.lastInputSend < 80) return;
+  if (now - MP.lastInputSend < 33) return; // 30fps发送，降低操作延迟
   MP.lastInputSend = now;
-  const standUp = !!MP._clientStandRequest;
-  MP._clientStandRequest = false;
+  // 黑猪模式：同步坐下状态和椅子索引
+  let sitting = false, chairIdx = -1;
+  if (gameMode === 'blackpig' && typeof deskChairs !== 'undefined') {
+    const idx = deskChairs.findIndex(c => c.occupiedBy === 'self');
+    if (idx >= 0) { sitting = true; chairIdx = idx; }
+  }
+  // 服务端权威：只发送摇杆输入，位置由主机计算后强制同步
   Bridge.send(JSON.stringify({type:'input', input:{
     dx:joystick.dx, dy:joystick.dy, yaw:player.yaw, pitch:player.pitch,
-    sprint:sprintActive, jump:!player.onGround, standUp:standUp,
+    sprint:sprintActive, jump:!player.onGround, sitting, chairIdx,
   }}));
 }
 function clientSendAttack(stage) {
   if (MP.mode !== 'client' || !MP.connected) return;
-  if (MP._clientDead) return;
   Bridge.send(JSON.stringify({type:'attack', stage}));
 }
 function showDeathOverlay() {
@@ -758,12 +1049,23 @@ function showDeathOverlay() {
   el.style.display = 'flex';
 }
 function hideDeathOverlay() { const el = document.getElementById('mpDeathOverlay'); if (el) el.style.display = 'none'; }
+function showHostDeath() {
+  let el = document.getElementById('hostDeathOverlay');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'hostDeathOverlay';
+    el.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(180,0,0,0.4);z-index:60;pointer-events:none;display:flex;align-items:center;justify-content:center;';
+    el.innerHTML = '<div style="text-align:center;color:#fff;font-size:36px;font-weight:bold;text-shadow:0 0 12px #000;">你被击倒了<br><span style="font-size:20px;">复活中...</span></div>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+function hideHostDeath() { const el = document.getElementById('hostDeathOverlay'); if (el) el.style.display = 'none'; }
 
 function startRoomScan() {
   MP.foundRooms = []; Bridge.startScan();
   MP.scanTimer = setInterval(() => {
     const now = Date.now();
-    MP.foundRooms = MP.foundRooms.filter(r => now - r._lastSeen < 5000);
+    MP.foundRooms = MP.foundRooms.filter(r => now - r._lastSeen < 10000);
     if (MP.onRoomListUpdate) MP.onRoomListUpdate(MP.foundRooms);
   }, 1000);
 }
@@ -777,7 +1079,11 @@ function cleanupMultiplayer() {
   clearExtraBots();
   MP.gameStarted = false; MP.connected = false;
   MP._hostHealth = 100; MP._hostDead = false; MP._hostRespawnTimer = 0; MP._hostInvincible = 0;
-  MP._clientDead = false; hideDeathOverlay();
+  MP._clientDead = false; hideDeathOverlay(); hideHostDeath();
+  MP.MAX_PLAYERS = 6; // 恢复默认最大人数
+  window._pendingSrtMulti = false;
+  window._srtSelectedSrt = null;
+  if (typeof srtIsPlayerSRT !== 'undefined') srtIsPlayerSRT = false;
 }
 
 function mpUpdate(dt) {
@@ -786,10 +1092,27 @@ function mpUpdate(dt) {
     hostUpdateRemotePlayers(dt);
     if (gameMode === 'hunt' || gameMode === 'normal') hostUpdateBots(dt);
     const now = Date.now();
-    if (now - MP.lastStateBroadcast > 100) { MP.lastStateBroadcast = now; if (MP.gameStarted) hostBroadcastState(); }
+    if (now - MP.lastStateBroadcast > 50) { MP.lastStateBroadcast = now; if (MP.gameStarted) hostBroadcastState(); }
   } else if (MP.mode === 'client') {
     clientSendInput();
     clientUpdateRemotePlayers(dt);
+    // SRT实体插值（非自己控制时）
+    if (gameMode === 'srt' && typeof srt !== 'undefined' && srt.mesh && !srtIsPlayerSRT && srt.targetX !== undefined) {
+      const lf = Math.min(1, dt*12);
+      srt.x += (srt.targetX - srt.x) * lf;
+      srt.z += (srt.targetZ - srt.z) * lf;
+      srt.mesh.position.set(srt.x, 2, srt.z);
+      srt.mesh.lookAt(camera.position.x, 2, camera.position.z);
+      if (srt.hasFrog && srtFrog.mesh) {
+        srtFrog.mesh.position.set(srt.x, 0.8, srt.z + 1);
+        srtFrog.mesh.lookAt(camera.position.x, 0.8, camera.position.z);
+      }
+      // 逃跑倒计时
+      if (srt.state === 'running' && typeof SRT_ESCAPE_TIME !== 'undefined') {
+        const remain = Math.ceil(SRT_ESCAPE_TIME - (srt.escapeTimer || 0));
+        if (remain > 0 && typeof showSRTStatus === 'function') showSRTStatus('SRT逃跑中！剩余 ' + remain + ' 秒');
+      }
+    }
   }
 }
 function mpOnGameStart(mode) {
@@ -801,7 +1124,11 @@ function mpOnGameStart(mode) {
       const p = MP.players[id];
       const sp = findSafeSpawn(); p.x=sp.x; p.z=sp.z;
       p.health=MP.MAX_HEALTH; p.dead=false; p.alive=true; p.respawnTimer=0; p.invincible=0;
-      if (p.mesh) { setPlayerDead(p.mesh, false); p.mesh.visible = true; }
+      if (p.mesh) { setPlayerDead(p.mesh, false); p.mesh.visible = (mode !== 'srt' || window._srtSelectedSrt !== id); }
+    }
+    // SRT模式：通知所有客户端谁是SRT
+    if (mode === 'srt') {
+      Bridge.broadcast(JSON.stringify({type:'srtAssign', srtPlayerId: window._srtSelectedSrt || null}));
     }
     Bridge.broadcast(JSON.stringify({type:'startGame', mode}));
     hostBroadcastRoom();

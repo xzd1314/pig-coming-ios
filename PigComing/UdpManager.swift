@@ -141,10 +141,11 @@ class UdpManager {
         var yes: Int32 = 1
         setsockopt(broadcastSocket, SOL_SOCKET, SO_BROADCAST, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
 
+        let broadcastIP = getBroadcastAddress()
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        addr.sin_addr.s_addr = INADDR_BROADCAST.bigEndian
+        inet_aton(broadcastIP, &addr.sin_addr)
 
         let data = roomInfo.data(using: .utf8) ?? Data()
         let addrSize = socklen_t(MemoryLayout.size(ofValue: addr))
