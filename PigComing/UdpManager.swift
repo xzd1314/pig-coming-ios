@@ -145,9 +145,7 @@ class UdpManager {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        var broadcastAddr = in_addr()
-        inet_pton(AF_INET, broadcastIP, &broadcastAddr)
-        addr.sin_addr = broadcastAddr
+        inet_aton(broadcastIP, &addr.sin_addr)
 
         let data = roomInfo.data(using: .utf8) ?? Data()
         let addrSize = socklen_t(MemoryLayout.size(ofValue: addr))
@@ -168,33 +166,31 @@ class UdpManager {
         guard scanSocket >= 0 else { return }
         var yes: Int32 = 1
         setsockopt(scanSocket, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
-        setsockopt(scanSocket, SOL_SOCKET, SO_REUSEPORT, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
         addr.sin_addr.s_addr = INADDR_ANY.bigEndian
-        addr.sin_len = UInt8(MemoryLayout.size(ofValue: addr))
 
+        let addrSize = socklen_t(MemoryLayout.size(ofValue: addr))
         let bindResult = withUnsafePointer(to: &addr) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
-                bind(scanSocket, saPtr, socklen_t(MemoryLayout.size(ofValue: addr)))
+                bind(scanSocket, saPtr, addrSize)
             }
         }
         guard bindResult == 0 else { return }
 
         var buffer = [UInt8](repeating: 0, count: 4096)
+        var senderAddr = sockaddr_in()
+        var senderLen = socklen_t(MemoryLayout.size(ofValue: senderAddr))
         while isScanning {
-            var senderAddr = sockaddr_in()
-            var senderLen = socklen_t(MemoryLayout.size(ofValue: senderAddr))
-            let bytesRead = buffer.withUnsafeMutableBufferPointer { bufPtr in
-                withUnsafeMutablePointer(to: &senderAddr) { addrPtr in
-                    addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
-                        recvfrom(scanSocket, bufPtr.baseAddress, buffer.count, 0, saPtr, &senderLen)
-                    }
+            let bytesRead = withUnsafeMutablePointer(to: &senderAddr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
+                    recvfrom(scanSocket, &buffer, buffer.count, 0, saPtr, &senderLen)
                 }
             }
             if bytesRead > 0 {
+                let msg = String(cString: buffer) // 可能有问题，用Data
                 let data = Data(bytes: buffer, count: bytesRead)
                 if let msg = String(data: data, encoding: .utf8) {
                     let ip = inet_ntoa(senderAddr.sin_addr).flatMap { String(cString: $0) } ?? "unknown"
