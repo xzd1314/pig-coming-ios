@@ -671,6 +671,7 @@
 <script src="three.min.js"></script>
 <script src="bot_texture.js"></script>
 <script src="embedded_images.js"></script>
+<script src="srt_textures.js"></script>
 <script src="multiplayer.js"></script>
 <script>
 // ==================== 通用提示（替代alert，适配WebView） ====================
@@ -1125,7 +1126,7 @@ function buildSRTMap() {
   scene.fog = null;
   scene.background = new THREE.Color(0x87CEEB); // 白天天空蓝
   // 地板用srt_floor.jpg
-  const floorTex = new THREE.TextureLoader().load('./srt_floor.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
+  const floorTex = new THREE.TextureLoader().load(SRT_FLOOR_TEX_DATA, t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
   floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
   floorTex.repeat.set(4, 4);
   const floorGeo = new THREE.PlaneGeometry(SRT_FIELD_SIZE, SRT_FIELD_SIZE);
@@ -1155,7 +1156,7 @@ function clearSRTMap() {
   srtMapBuilt = false;
 }
 function createSRTRntity() {
-  const tex = new THREE.TextureLoader().load('./srt_entity.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
+  const tex = new THREE.TextureLoader().load(SRT_ENTITY_TEX_DATA, t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
   const mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, side: THREE.DoubleSide});
   const geo = new THREE.PlaneGeometry(4, 4);
   srt.mesh = new THREE.Mesh(geo, mat);
@@ -1166,7 +1167,7 @@ function createSRTRntity() {
 }
 function createFrog() {
   // 青蛙用图片
-  const frogTex = new THREE.TextureLoader().load('./srt_frog.png', t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
+  const frogTex = new THREE.TextureLoader().load(SRT_FROG_TEX_DATA, t=>{t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;});
   const frogMat = new THREE.MeshBasicMaterial({map: frogTex, transparent: true, side: THREE.DoubleSide});
   const frogGeo = new THREE.PlaneGeometry(1.5, 1.5);
   srtFrog.mesh = new THREE.Mesh(frogGeo, frogMat);
