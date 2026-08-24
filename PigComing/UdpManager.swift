@@ -145,7 +145,9 @@ class UdpManager {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        inet_aton(broadcastIP, &addr.sin_addr)
+        var broadcastAddr = in_addr()
+        inet_pton(AF_INET, broadcastIP, &broadcastAddr)
+        addr.sin_addr = broadcastAddr
 
         let data = roomInfo.data(using: .utf8) ?? Data()
         let addrSize = socklen_t(MemoryLayout.size(ofValue: addr))
