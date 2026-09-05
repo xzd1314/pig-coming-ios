@@ -8,6 +8,7 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     var isHost = false
     var serverPort: UInt16 = 8765
     let gameLauncher = GameLauncher()
+    let gameSchemeHandler = GameSchemeHandler()
     private var launcherHandled = false
 
     override func viewDidLoad() {
@@ -27,6 +28,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         let userController = WKUserContentController()
         userController.add(self, name: "bridge")
         config.userContentController = userController
+        // 注册自定义 scheme：game:// 请求从内存字典读取，磁盘不留明文
+        config.setURLSchemeHandler(gameSchemeHandler, forURLScheme: "game")
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
@@ -92,6 +95,7 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func setupGameLauncher() {
+        gameSchemeHandler.gameLauncher = gameLauncher
         gameLauncher.onStatus = { [weak self] text, tag in
             self?.jsSafe("setStatus('\(self?.jsString(text) ?? "")', '\(self?.jsString(tag) ?? "")')")
         }
@@ -118,8 +122,10 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadLocalGame() {
-        let url = gameLauncher.indexPath
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        // 游戏用自定义 scheme game:// 加载，从内存字典读取文件（磁盘不留明文）
+        if let url = URL(string: "game://index.html") {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     private func jsString(_ s: String) -> String {

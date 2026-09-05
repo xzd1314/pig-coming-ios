@@ -1,8 +1,8 @@
 import UIKit
 import CryptoKit
 
-// 游戏远程拉取管理器：版本对比 → 下载 → 校验 → 解密 → 解压
-// 版本号用 Unix 时间戳（整数，秒），天然递增
+// 游戏远程拉取管理器：版本对比 → 下载 → 校验 → 解密 → 解压到内存
+// 磁盘上只存加密 bin（离线缓存），不存明文游戏文件
 final class GameLauncher: NSObject {
     // 回调
     var onStatus: ((String, String) -> Void)?
@@ -18,37 +18,47 @@ final class GameLauncher: NSObject {
     private let manifestTimeout: TimeInterval = 2
     private let downloadTimeout: TimeInterval = 120
 
-    // 密钥（与服务器 build_release.py 一致，第二段倒序存储）
+    // 密钥（第二段倒序存储）
     private let keyHexPart1 = "0dc40b4c92fbbe21974f98f9d8c0ae01"
     private let keyHexPart2 = "b05399713f89b2e28370d8c09e22645a"
 
-    // 本地路径
-    private var gameDir: URL {
+    // 本地路径（只存加密 bin + version.txt）
+    private var cacheDir: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("zhulaile", isDirectory: true)
     }
-    private var versionFile: URL { gameDir.appendingPathComponent("version.txt") }
-    var indexPath: URL { gameDir.appendingPathComponent("index.html") }
+    private var versionFile: URL { cacheDir.appendingPathComponent("version.txt") }
+
+    // 内存中的游戏文件字典（解密解压后存在这里，WebView 从这里读）
+    private(set) var gameFiles: [String: Data] = [:]
 
     // 下载进度
     private var lastProgressTime = Date()
     private var lastProgressBytes: Double = 0
 
+    /// 从内存字典获取文件内容（供 WKURLSchemeHandler 调用）
+    func getFile(_ path: String) -> Data? {
+        var key = path
+        if key.hasPrefix("/") { key.removeFirst() }
+        return gameFiles[key]
+    }
+
     func launch() {
-        let fm = FileManager.default
-        let hasLocal = fm.fileExists(atPath: indexPath.path)
         let localVersionStr = (try? String(contentsOf: versionFile, encoding: .utf8)) ?? "无"
         let localVersion = Int(localVersionStr) ?? 0
         onLocalVersion?(localVersionStr)
 
-        if !hasLocal {
+        let localBin = findLocalBin()
+
+        if localBin == nil {
             onStatus?("正在连接服务器…", "连接中")
             Task {
                 do {
                     let manifest = try await fetchManifest()
                     onLatestVersion?("\(manifest.version)")
                     onPackSize?(Double(manifest.size) / 1024 / 1024)
-                    try await downloadAndInstall(manifest: manifest)
+                    try await downloadAndCache(manifest: manifest)
+                    try loadFromCache(version: manifest.version)
                     onLocalVersion?("\(manifest.version)")
                     onStatus?("准备进入游戏…", "完成")
                     onComplete?()
@@ -58,6 +68,9 @@ final class GameLauncher: NSObject {
             }
             return
         }
+
+        // 本地有加密 bin：先加载到内存（保证离线可玩）
+        try? loadFromCache(version: localVersion)
 
         onStatus?("正在检查更新…", "检查中")
         Task {
@@ -73,7 +86,8 @@ final class GameLauncher: NSObject {
                     onPackSize?(Double(m.size) / 1024 / 1024)
                     onStatus?("发现新版本，开始下载…", "下载中")
                     do {
-                        try await downloadAndInstall(manifest: m)
+                        try await downloadAndCache(manifest: m)
+                        try loadFromCache(version: m.version)
                         onLocalVersion?("\(m.version)")
                     } catch {
                         NSLog("[GameLauncher] update failed: \(error)")
@@ -99,8 +113,9 @@ final class GameLauncher: NSObject {
         return try JSONDecoder().decode(Manifest.self, from: data)
     }
 
-    // MARK: - 下载 + 校验 + 解密 + 解压
-    private func downloadAndInstall(manifest: Manifest) async throws {
+    // MARK: - 下载 + 存磁盘（只存加密 bin）
+
+    private func downloadAndCache(manifest: Manifest) async throws {
         let binURL = serverBase.appendingPathComponent(manifest.file)
         let totalMB = Double(manifest.size) / 1024 / 1024
 
@@ -109,45 +124,59 @@ final class GameLauncher: NSObject {
         let binData = try await downloadWithProgress(url: binURL, totalMB: totalMB)
 
         onStatus?("下载完成，正在校验完整性…", "校验中")
-
-        // 1. sha256
         let digest = SHA256.hash(data: binData).map { String(format: "%02x", $0) }.joined()
         guard digest == manifest.sha256 else {
             throw NSError(domain: "GameLauncher", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "文件校验失败"])
         }
 
-        onStatus?("正在解密游戏资源…", "解密中")
+        let fm = FileManager.default
+        try fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let binFile = cacheDir.appendingPathComponent(manifest.file)
+        try binData.write(to: binFile)
+        try String(manifest.version).write(to: versionFile, atomically: true, encoding: .utf8)
 
-        // 2. AES-GCM 解密（服务器格式：nonce(12)+ciphertext+tag(16)，即 SealedBox combined 格式）
+        // 清理旧 bin
+        if let bins = try? fm.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil) {
+            for f in bins {
+                if f.lastPathComponent.hasPrefix("game_") && f.lastPathComponent.hasSuffix(".bin")
+                    && f.lastPathComponent != manifest.file {
+                    try? fm.removeItem(at: f)
+                }
+            }
+        }
+    }
+
+    // MARK: - 从磁盘加密 bin 解密解压到内存
+
+    private func loadFromCache(version: Int) throws {
+        guard let binFile = findLocalBin() else {
+            throw NSError(domain: "GameLauncher", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "本地缓存不存在"])
+        }
+
+        onStatus?("正在解密游戏资源…", "解密中")
+        let binData = try Data(contentsOf: binFile)
+
+        // AES-GCM 解密（服务器格式：nonce(12)+ciphertext+tag(16) = SealedBox combined 格式）
         let sealed = try AES.GCM.SealedBox(combined: binData)
         let zipData = try AES.GCM.open(sealed, using: aesKey())
 
-        onStatus?("正在解压文件…", "解压中")
-
-        // 3. 解压到临时目录
-        let fm = FileManager.default
-        let tmp = fm.temporaryDirectory
-            .appendingPathComponent("zhulaile_\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
-        try ZipExtractor.extract(zipData: zipData, to: tmp)
-        guard fm.fileExists(atPath: tmp.appendingPathComponent("index.html").path) else {
-            throw NSError(domain: "GameLauncher", code: 2,
+        onStatus?("正在加载到内存…", "加载中")
+        gameFiles = try ZipExtractor.extractToMemory(zipData: zipData)
+        guard gameFiles["index.html"] != nil else {
+            throw NSError(domain: "GameLauncher", code: 3,
                           userInfo: [NSLocalizedDescriptionKey: "游戏包格式错误"])
         }
+    }
 
-        // 4. 替换本地
-        if fm.fileExists(atPath: gameDir.path) {
-            try fm.removeItem(at: gameDir)
+    private func findLocalBin() -> URL? {
+        let fm = FileManager.default
+        guard let bins = try? fm.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil) else {
+            return nil
         }
-        try fm.createDirectory(at: gameDir, withIntermediateDirectories: true)
-        for item in try fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) {
-            try fm.moveItem(at: item, to: gameDir.appendingPathComponent(item.lastPathComponent))
-        }
-        try String(manifest.version).write(to: versionFile, atomically: true, encoding: .utf8)
-
-        // 5. 清理
-        try? fm.removeItem(at: tmp)
+        let gameBins = bins.filter { $0.lastPathComponent.hasPrefix("game_") && $0.lastPathComponent.hasSuffix(".bin") }
+        return gameBins.max { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     // MARK: - 网络工具
@@ -159,7 +188,7 @@ final class GameLauncher: NSObject {
         let (data, response) = try await session.data(from: url)
         session.finishTasksAndInvalidate()
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw NSError(domain: "GameLauncher", code: 3,
+            throw NSError(domain: "GameLauncher", code: 4,
                           userInfo: [NSLocalizedDescriptionKey: "HTTP error"])
         }
         return data

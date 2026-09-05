@@ -15,6 +15,7 @@
 		A100000600000000000006 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = A200000600000000000006 /* assets */; };
 		A100002000000000000020 /* GameLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002000000000000020 /* GameLauncher.swift */; };
 		A100002100000000000021 /* ZipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002100000000000021 /* ZipExtractor.swift */; };
+		A100002200000000000022 /* GameSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002200000000000022 /* GameSchemeHandler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 		A200000800000000000008 /* PigComing.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PigComing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200002000000000000020 /* GameLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLauncher.swift; sourceTree = "<group>"; };
 		A200002100000000000021 /* ZipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipExtractor.swift; sourceTree = "<group>"; };
+		A200002200000000000022 /* GameSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSchemeHandler.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +60,7 @@
 				A200000400000000000004 /* UdpManager.swift */,
 				A200002000000000000020 /* GameLauncher.swift */,
 				A200002100000000000021 /* ZipExtractor.swift */,
+				A200002200000000000022 /* GameSchemeHandler.swift */,
 				A200000500000000000005 /* Assets.xcassets */,
 				A200000600000000000006 /* assets */,
 				A200000700000000000007 /* Info.plist */,
@@ -149,6 +152,7 @@
 				A100000400000000000004 /* UdpManager.swift in Sources */,
 				A100002000000000000020 /* GameLauncher.swift in Sources */,
 				A100002100000000000021 /* ZipExtractor.swift in Sources */,
+				A100002200000000000022 /* GameSchemeHandler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
