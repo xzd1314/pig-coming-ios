@@ -7,7 +7,7 @@ final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private static let mimeMap: [String: String] = [
         "html": "text/html", "htm": "text/html",
-        "js": "application/javascript",
+        "js": "text/javascript",
         "css": "text/css",
         "json": "application/json",
         "png": "image/png",
@@ -26,6 +26,9 @@ final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
         "xml": "application/xml",
     ]
 
+    // 文本类型需要指定 utf-8 编码
+    private static let textExts: Set<String> = ["html", "htm", "js", "css", "json", "txt", "xml", "svg"]
+
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         let url = urlSchemeTask.request.url!
         var path = url.path
@@ -37,26 +40,19 @@ final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
         if let data = gameLauncher?.getFile(path) {
             let ext = (path as NSString).pathExtension.lowercased()
             let mime = Self.mimeMap[ext] ?? "application/octet-stream"
-            NSLog("[GameScheme] HIT: \(path) (\(data.count) bytes, mime: \(mime))")
-            // 用 HTTPURLResponse 返回正确的状态码和 header
-            let headers = ["Content-Type": mime, "Content-Length": "\(data.count)"]
-            if let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) {
-                urlSchemeTask.didReceive(response)
-            } else {
-                let response = URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil)
-                urlSchemeTask.didReceive(response)
-            }
+            let encoding = Self.textExts.contains(ext) ? "utf-8" : nil
+            NSLog("[GameScheme] HIT: \(path) (\(data.count) bytes, mime: \(mime), encoding: \(encoding ?? "nil"))")
+            // 自定义 scheme 用 URLResponse（不是 HTTPURLResponse），确保 MIME 和编码正确
+            let response = URLResponse(url: url, mimeType: mime,
+                                        expectedContentLength: data.count, textEncodingName: encoding)
+            urlSchemeTask.didReceive(response)
             urlSchemeTask.didReceive(data)
             urlSchemeTask.didFinish()
         } else {
             NSLog("[GameScheme] MISS: \(path) (gameLauncher=\(gameLauncher != nil), files=\(gameLauncher?.gameFiles.count ?? 0))")
-            let headers = ["Content-Type": "text/plain"]
-            if let response = HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: headers) {
-                urlSchemeTask.didReceive(response)
-            } else {
-                let response = URLResponse(url: url, mimeType: "text/plain", expectedContentLength: 0, textEncodingName: "utf-8")
-                urlSchemeTask.didReceive(response)
-            }
+            let response = URLResponse(url: url, mimeType: "text/plain",
+                                        expectedContentLength: 0, textEncodingName: "utf-8")
+            urlSchemeTask.didReceive(response)
             urlSchemeTask.didFinish()
         }
     }
