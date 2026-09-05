@@ -108,9 +108,10 @@ final class GameLauncher: NSObject {
     }
 
     private func fetchManifest() async throws -> Manifest {
-        // 加时间戳参数绕 CDN 缓存，确保拿到最新版本号
-        var url = serverBase.appendingPathComponent("manifest.json")
-        url.append(queryItems: [URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970)))])
+        // 加时间戳参数绕 CDN 缓存，确保拿到最新版本号（兼容 iOS 15，不用 append(queryItems:)）
+        var components = URLComponents(url: serverBase.appendingPathComponent("manifest.json"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970)))]
+        let url = components.url!
         let data = try await fetchData(url: url, timeout: manifestTimeout)
         return try JSONDecoder().decode(Manifest.self, from: data)
     }
