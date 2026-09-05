@@ -28,9 +28,9 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         let userController = WKUserContentController()
         userController.add(self, name: "bridge")
         config.userContentController = userController
-        // 注册自定义 scheme：app:// 请求从内存字典读取，磁盘不留明文
-        // 用 app:// 而不是 game://，避免 game 与系统保留 scheme 冲突
-        config.setURLSchemeHandler(gameSchemeHandler, forURLScheme: "app")
+        // 注册自定义 scheme：pigcoming:// 请求从内存字典读取，磁盘不留明文
+        // 用独特的 scheme 名称，避免与系统保留 scheme 冲突
+        config.setURLSchemeHandler(gameSchemeHandler, forURLScheme: "pigcoming")
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
@@ -123,9 +123,9 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadLocalGame() {
-        // 游戏用自定义 scheme app:// 加载，从内存字典读取文件（磁盘不留明文）
-        // 用 app://game/index.html 标准格式（有 host），避免无 host URL 导致子资源加载失败
-        if let url = URL(string: "app://game/index.html") {
+        // 游戏用自定义 scheme pigcoming:// 加载，从内存字典读取文件（磁盘不留明文）
+        // 用 pigcoming://game/index.html 标准格式（有 host），避免无 host URL 导致子资源加载失败
+        if let url = URL(string: "pigcoming://game/index.html") {
             webView.load(URLRequest(url: url))
         }
     }
