@@ -127,8 +127,8 @@ final class GameLauncher: NSObject {
         onStatus?("正在解密游戏资源…", "解密中")
 
         // 2. AES-GCM 解密
-        let combined = Data(binData.dropFirst(12))
-        let sealed = try AES.GCM.SealedBox(combined: combined)
+        // 服务器格式：nonce(12) + ciphertext + tag(16)，正好是 CryptoKit SealedBox(combined:) 期望的完整格式
+        let sealed = try AES.GCM.SealedBox(combined: binData)
         let zipData = try AES.GCM.open(sealed, using: aesKey())
 
         onStatus?("正在解压文件…", "解压中")
