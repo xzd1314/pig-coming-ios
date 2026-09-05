@@ -39,9 +39,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         // 用屏幕大小创建 WebView，忽略安全区域（iPhone 横屏左右黑边问题）
         webView = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         webView.navigationDelegate = self
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // 去掉 autoresizingMask，避免被 view 的安全区域布局覆盖
+        webView.autoresizingMask = []
         webView.isOpaque = false
         webView.backgroundColor = .black
+        webView.isUserInteractionEnabled = true
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.contentMode = .scaleToFill
@@ -51,7 +53,12 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         if #available(iOS 16.4, *) {
             webView.isInspectable = true
         }
-        view.addSubview(webView)
+        // 添加到 window 上，不受 view 安全区域限制
+        if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
+            window.addSubview(webView)
+        } else {
+            view.addSubview(webView)
+        }
     }
 
     private func setupCallbacks() {
