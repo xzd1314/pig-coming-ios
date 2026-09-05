@@ -7,6 +7,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     let udpManager = UdpManager()
     var isHost = false
     var serverPort: UInt16 = 8765
+    let gameLauncher = GameLauncher()
+    private var launcherHandled = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -74,8 +76,61 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadGame() {
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "assets") {
+        // 先加载启动页（空壳内置），GameLauncher 完成后再加载本地游戏
+        if let url = Bundle.main.url(forResource: "launcher", withExtension: "html", subdirectory: "assets") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    // MARK: - 启动页 → GameLauncher
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !launcherHandled, webView.url?.lastPathComponent == "launcher.html" else { return }
+        launcherHandled = true
+        setupGameLauncher()
+        gameLauncher.launch()
+    }
+
+    private func setupGameLauncher() {
+        gameLauncher.onStatus = { [weak self] text, tag in
+            self?.jsSafe("setStatus('\(self?.jsString(text) ?? "")', '\(self?.jsString(tag) ?? "")')")
+        }
+        gameLauncher.onProgress = { [weak self] percent, downloaded, total, speed in
+            self?.jsSafe("updateProgress(\(percent), \(downloaded), \(total), \(speed))")
+        }
+        gameLauncher.onLatestVersion = { [weak self] v in
+            self?.jsSafe("setLatestVersion('\(self?.jsString(v) ?? "")')")
+        }
+        gameLauncher.onLocalVersion = { [weak self] v in
+            self?.jsSafe("setLocalVersion('\(self?.jsString(v) ?? "")')")
+        }
+        gameLauncher.onPackSize = { [weak self] mb in
+            self?.jsSafe("setPackSize(\(mb))")
+        }
+        gameLauncher.onError = { [weak self] msg in
+            self?.jsSafe("setError('\(self?.jsString(msg) ?? "")')")
+        }
+        gameLauncher.onComplete = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self?.loadLocalGame()
+            }
+        }
+    }
+
+    private func loadLocalGame() {
+        let url = gameLauncher.indexPath
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+
+    private func jsString(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "'", with: "\\'")
+         .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    private func jsSafe(_ script: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.evaluateJavaScript(script, completionHandler: nil)
         }
     }
 

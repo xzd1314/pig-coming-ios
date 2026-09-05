@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>猪来了 nextbot</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    background:#fff;
+    color:#111;
+    font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:clamp(16px, 5vw, 56px);
+    -webkit-font-smoothing:antialiased;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  .wrap { width:100%; max-width:880px; }
+  .header {
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-bottom:1px solid #e5e5e5;
+    padding-bottom:clamp(10px, 2vh, 18px);
+    margin-bottom:clamp(16px, 3vh, 28px);
+  }
+  .title { font-size:clamp(18px, 2.6vw, 26px); font-weight:600; letter-spacing:0.5px; }
+  .latest {
+    font-size:clamp(11px, 1.4vw, 13px); color:#666;
+    font-family:'SF Mono', Menlo, Consolas, monospace;
+  }
+  .grid {
+    display:grid; grid-template-columns: 1fr 1.6fr;
+    gap:clamp(20px, 5vw, 56px); align-items:start;
+  }
+  @media (max-width:620px), (orientation:portrait) and (max-width:760px) {
+    .grid { grid-template-columns:1fr; gap:20px; }
+  }
+  .info-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:clamp(7px,1.4vh,10px) 0;
+    border-bottom:1px solid #f0f0f0;
+    font-size:clamp(12px,1.5vw,14px);
+  }
+  .info-row:last-child { border-bottom:none; }
+  .info-label { color:#666; }
+  .info-value {
+    font-family:'SF Mono', Menlo, Consolas, monospace;
+    font-weight:500; color:#111;
+  }
+  .info-value.muted { color:#999; }
+  .info-value.accent { color:#0066cc; }
+  .progress-block { }
+  .progress-top {
+    display:flex; justify-content:space-between;
+    font-size:clamp(11px,1.4vw,13px); color:#666; margin-bottom:8px;
+  }
+  .progress-top .pct {
+    font-family:'SF Mono', Menlo, Consolas, monospace;
+    color:#111; font-weight:500;
+  }
+  .progress-bar {
+    height:4px; background:#eee; border-radius:2px;
+    overflow:hidden; margin-bottom:10px;
+  }
+  .progress-fill {
+    height:100%; background:#0066cc; width:0%;
+    transition:width 0.15s linear;
+  }
+  .progress-meta {
+    display:flex; justify-content:space-between;
+    font-size:clamp(11px,1.3vw,12.5px); color:#666;
+    font-family:'SF Mono', Menlo, Consolas, monospace;
+  }
+  .progress-meta .speed { color:#0066cc; }
+  .status {
+    margin-top:clamp(20px, 4vh, 36px);
+    font-size:clamp(13px,1.6vw,15px); color:#333;
+    min-height:22px; display:flex; align-items:center;
+  }
+  .status .dot {
+    display:inline-block; width:6px; height:6px;
+    background:#0066cc; border-radius:50%;
+    margin-right:10px; flex-shrink:0;
+    animation:pulse 1.2s infinite;
+  }
+  .status.error .dot { background:#cc0000; }
+  .status.error { color:#cc0000; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">猪来了 nextbot</div>
+      <div class="latest" id="latestVer">最新版 --</div>
+    </div>
+    <div class="grid">
+      <div class="info">
+        <div class="info-row">
+          <span class="info-label">本地版本</span>
+          <span class="info-value muted" id="localVer">无</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">当前状态</span>
+          <span class="info-value accent" id="statusTag">初始化</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">包大小</span>
+          <span class="info-value" id="packSize">-- MB</span>
+        </div>
+      </div>
+      <div class="progress-block">
+        <div class="progress-top">
+          <span>下载进度</span>
+          <span class="pct" id="percent">0.0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="fill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="sizeText">0.0 MB / 0.0 MB</span>
+          <span class="speed" id="speedText">-- MB/s</span>
+        </div>
+      </div>
+    </div>
+    <div class="status" id="statusBox">
+      <span class="dot"></span>
+      <span id="statusText">正在启动…</span>
+    </div>
+  </div>
+
+<script>
+// 原生壳通过 evaluateJavaScript 调用以下函数更新 UI
+window.setLatestVersion = function(v) {
+  document.getElementById('latestVer').textContent = '最新版 ' + v;
+};
+window.setLocalVersion = function(v) {
+  var el = document.getElementById('localVer');
+  el.textContent = v;
+  el.className = 'info-value' + (v === '无' ? ' muted' : '');
+};
+window.setStatus = function(text, tag) {
+  document.getElementById('statusText').textContent = text;
+  if (tag) document.getElementById('statusTag').textContent = tag;
+  document.getElementById('statusBox').className = 'status';
+};
+window.setError = function(text) {
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('statusTag').textContent = '错误';
+  document.getElementById('statusBox').className = 'status error';
+};
+window.updateProgress = function(percent, downloadedMB, totalMB, speedMBs) {
+  document.getElementById('fill').style.width = percent + '%';
+  document.getElementById('percent').textContent = percent.toFixed(1) + '%';
+  document.getElementById('sizeText').textContent =
+    downloadedMB.toFixed(1) + ' MB / ' + totalMB.toFixed(1) + ' MB';
+  document.getElementById('speedText').textContent = speedMBs.toFixed(1) + ' MB/s';
+};
+window.setPackSize = function(mb) {
+  document.getElementById('packSize').textContent = mb.toFixed(1) + ' MB';
+};
+</script>
+</body>
+</html>
