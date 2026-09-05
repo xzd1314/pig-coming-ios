@@ -2,11 +2,11 @@ import UIKit
 import CryptoKit
 
 // 游戏远程拉取管理器：版本对比 → 下载 → 校验 → 解密 → 解压
+// 版本号用 Unix 时间戳（整数，秒），天然递增
 final class GameLauncher: NSObject {
-
     // 回调
-    var onStatus: ((String, String) -> Void)?       // (状态文字, 状态标签)
-    var onProgress: ((Double, Double, Double, Double) -> Void)? // (百分比, 已下载MB, 总MB, 速度MB/s)
+    var onStatus: ((String, String) -> Void)?
+    var onProgress: ((Double, Double, Double, Double) -> Void)?
     var onLatestVersion: ((String) -> Void)?
     var onLocalVersion: ((String) -> Void)?
     var onPackSize: ((Double) -> Void)?
@@ -37,19 +37,19 @@ final class GameLauncher: NSObject {
     func launch() {
         let fm = FileManager.default
         let hasLocal = fm.fileExists(atPath: indexPath.path)
-        let localVersion = (try? String(contentsOf: versionFile, encoding: .utf8)) ?? "无"
-        onLocalVersion?(localVersion)
+        let localVersionStr = (try? String(contentsOf: versionFile, encoding: .utf8)) ?? "无"
+        let localVersion = Int(localVersionStr) ?? 0
+        onLocalVersion?(localVersionStr)
 
         if !hasLocal {
-            // 本地没有：必须联网拉取
             onStatus?("正在连接服务器…", "连接中")
             Task {
                 do {
                     let manifest = try await fetchManifest()
-                    onLatestVersion?("v\(manifest.version)")
+                    onLatestVersion?("\(manifest.version)")
                     onPackSize?(Double(manifest.size) / 1024 / 1024)
                     try await downloadAndInstall(manifest: manifest)
-                    onLocalVersion?("v\(manifest.version)")
+                    onLocalVersion?("\(manifest.version)")
                     onStatus?("准备进入游戏…", "完成")
                     onComplete?()
                 } catch {
@@ -59,27 +59,23 @@ final class GameLauncher: NSObject {
             return
         }
 
-        // 本地有：查版本
         onStatus?("正在检查更新…", "检查中")
         Task {
             let manifest: Manifest?
             do {
                 manifest = try await fetchManifest()
             } catch {
-                manifest = nil // 连不上服务器 → 直接用本地
+                manifest = nil
             }
-
             if let m = manifest {
-                onLatestVersion?("v\(m.version)")
-                if String(m.version) != localVersion {
-                    // 版本不一致：下载更新
+                onLatestVersion?("\(m.version)")
+                if m.version > localVersion {
                     onPackSize?(Double(m.size) / 1024 / 1024)
-                    onStatus?("发现新版本 v\(m.version)，开始下载…", "下载中")
+                    onStatus?("发现新版本，开始下载…", "下载中")
                     do {
                         try await downloadAndInstall(manifest: m)
-                        onLocalVersion?("v\(m.version)")
+                        onLocalVersion?("\(m.version)")
                     } catch {
-                        // 下载失败：保留旧版
                         NSLog("[GameLauncher] update failed: \(error)")
                     }
                 }
@@ -90,7 +86,6 @@ final class GameLauncher: NSObject {
     }
 
     // MARK: - Manifest
-
     struct Manifest: Decodable {
         let version: Int
         let file: String
@@ -105,19 +100,17 @@ final class GameLauncher: NSObject {
     }
 
     // MARK: - 下载 + 校验 + 解密 + 解压
-
     private func downloadAndInstall(manifest: Manifest) async throws {
         let binURL = serverBase.appendingPathComponent(manifest.file)
         let totalMB = Double(manifest.size) / 1024 / 1024
 
-        // 下载（带进度）
         lastProgressTime = Date()
         lastProgressBytes = 0
         let binData = try await downloadWithProgress(url: binURL, totalMB: totalMB)
 
         onStatus?("下载完成，正在校验完整性…", "校验中")
 
-        // 1. sha256 校验
+        // 1. sha256
         let digest = SHA256.hash(data: binData).map { String(format: "%02x", $0) }.joined()
         guard digest == manifest.sha256 else {
             throw NSError(domain: "GameLauncher", code: 1,
@@ -126,8 +119,7 @@ final class GameLauncher: NSObject {
 
         onStatus?("正在解密游戏资源…", "解密中")
 
-        // 2. AES-GCM 解密
-        // 服务器格式：nonce(12) + ciphertext + tag(16)，正好是 CryptoKit SealedBox(combined:) 期望的完整格式
+        // 2. AES-GCM 解密（服务器格式：nonce(12)+ciphertext+tag(16)，即 SealedBox combined 格式）
         let sealed = try AES.GCM.SealedBox(combined: binData)
         let zipData = try AES.GCM.open(sealed, using: aesKey())
 
@@ -159,13 +151,13 @@ final class GameLauncher: NSObject {
     }
 
     // MARK: - 网络工具
-
     private func fetchData(url: URL, timeout: TimeInterval) async throws -> Data {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = timeout
         let session = URLSession(configuration: config)
         let (data, response) = try await session.data(from: url)
+        session.finishTasksAndInvalidate()
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw NSError(domain: "GameLauncher", code: 3,
                           userInfo: [NSLocalizedDescriptionKey: "HTTP error"])
@@ -181,7 +173,6 @@ final class GameLauncher: NSObject {
             let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
             let task = session.downloadTask(with: url)
             task.taskDescription = "totalMB:\(totalMB)"
-            // 保存 continuation
             objc_setAssociatedObject(self, &GameLauncher.continuationKey, continuation, .OBJC_ASSOCIATION_RETAIN)
             task.resume()
         }
@@ -190,7 +181,6 @@ final class GameLauncher: NSObject {
     private static var continuationKey: UInt8 = 0
 
     // MARK: - 密钥
-
     private func aesKey() -> SymmetricKey {
         let hex = keyHexPart1 + String(keyHexPart2.reversed())
         var bytes = [UInt8]()
@@ -205,7 +195,6 @@ final class GameLauncher: NSObject {
 }
 
 // MARK: - URLSessionDownloadDelegate
-
 extension GameLauncher: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
@@ -232,7 +221,6 @@ extension GameLauncher: URLSessionDownloadDelegate {
         let percent = downloaded / total * 100
         let downloadedMB = downloaded / 1024 / 1024
         let totalMB = total / 1024 / 1024
-
         let now = Date()
         let dt = now.timeIntervalSince(lastProgressTime)
         if dt >= 0.2 {
