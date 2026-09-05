@@ -26,7 +26,7 @@ final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
         "xml": "application/xml",
     ]
 
-    @objc func urlSchemeHandler(_ handler: WKURLSchemeHandler, start urlSchemeTask: WKURLSchemeTask) {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         let url = urlSchemeTask.request.url!
         var path = url.path
         if path.hasPrefix("/") { path.removeFirst() }
@@ -48,7 +48,7 @@ final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
-    @objc func urlSchemeHandler(_ handler: WKURLSchemeHandler, stop urlSchemeTask: WKURLSchemeTask) {
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
         // 同步从内存读取，不需要特殊处理
     }
 }
