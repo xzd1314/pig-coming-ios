@@ -123,7 +123,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
 
     private func loadLocalGame() {
         // 游戏用自定义 scheme game:// 加载，从内存字典读取文件（磁盘不留明文）
-        if let url = URL(string: "game://index.html") {
+        // 用 game://local/index.html 标准格式（有 host），避免无 host URL 导致子资源加载失败
+        if let url = URL(string: "game://local/index.html") {
             webView.load(URLRequest(url: url))
         }
     }
