@@ -20,7 +20,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        webView.frame = view.bounds
+        // 用屏幕大小，忽略安全区域（iPhone 横屏左右黑边问题）
+        webView.frame = UIScreen.main.bounds
     }
 
     private func setupWebView() {
@@ -35,7 +36,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
 
-        webView = WKWebView(frame: view.bounds, configuration: config)
+        // 用屏幕大小创建 WebView，忽略安全区域（iPhone 横屏左右黑边问题）
+        webView = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         webView.navigationDelegate = self
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.isOpaque = false
