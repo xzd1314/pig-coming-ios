@@ -14,7 +14,7 @@ final class GameLauncher: NSObject {
     var onComplete: (() -> Void)?
 
     // 配置
-    private let serverBase = URL(string: "https://xzd1314.top/zhulaile/ios/")!
+    private let serverBase = URL(string: "https://api.xzd1314.top/release/ios/")!
     private let manifestTimeout: TimeInterval = 2
     private let downloadTimeout: TimeInterval = 120
 
