@@ -16,7 +16,7 @@
 		A100002000000000000020 /* GameLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002000000000000020 /* GameLauncher.swift */; };
 		A100002200000000000022 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002200000000000022 /* SceneDelegate.swift */; };
 		A100002100000000000021 /* ZipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002100000000000021 /* ZipExtractor.swift */; };
-		A200002300000000000023 /* LocalHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002300000000000023; };
+		A100002300000000000023 /* LocalHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002300000000000023; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -156,7 +156,7 @@
 				A100002000000000000020 /* GameLauncher.swift in Sources */,
 				A100002200000000000022 /* SceneDelegate.swift in Sources */,
 				A100002100000000000021 /* ZipExtractor.swift in Sources */,
-				A200002300000000000023 /* LocalHTTPServer.swift in Sources */,
+				A100002300000000000023 /* LocalHTTPServer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
