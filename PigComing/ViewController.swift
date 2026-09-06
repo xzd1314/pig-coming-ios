@@ -8,8 +8,12 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     var isHost = false
     var serverPort: UInt16 = 8765
     let gameLauncher = GameLauncher()
-    let gameSchemeHandler = GameSchemeHandler()
     private var launcherHandled = false
+
+    deinit {
+        // 退出时清理临时目录（明文游戏文件）
+        gameLauncher.cleanup()
+    }
 
     // 重写 loadView，把 WebView 直接作为 view，自动撑满 window，不受安全区域限制
     override func loadView() {
@@ -17,8 +21,7 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         let userController = WKUserContentController()
         userController.add(self, name: "bridge")
         config.userContentController = userController
-        // 注册自定义 scheme：pigcoming:// 请求从内存字典读取，磁盘不留明文
-        config.setURLSchemeHandler(gameSchemeHandler, forURLScheme: "pigcoming")
+        // 用 file:// 加载本地临时目录里的游戏文件（和原 IPA 一致，兼容性最好）
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
@@ -123,11 +126,9 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadLocalGame() {
-        // 游戏用自定义 scheme pigcoming:// 加载，从内存字典读取文件（磁盘不留明文）
-        // 用 pigcoming://game/index.html 标准格式（有 host），避免无 host URL 导致子资源加载失败
-        if let url = URL(string: "pigcoming://game/index.html") {
-            webView.load(URLRequest(url: url))
-        }
+        // 用 file:// 加载临时目录里的游戏文件（和原 IPA 一致，兼容性最好）
+        let indexURL = gameLauncher.gameIndexURL
+        webView.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
     }
 
     private func jsString(_ s: String) -> String {

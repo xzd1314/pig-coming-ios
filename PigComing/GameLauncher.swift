@@ -1,8 +1,8 @@
 import UIKit
 import CryptoKit
 
-// 游戏远程拉取管理器：版本对比 → 下载 → 校验 → 解密 → 解压到内存
-// 磁盘上只存加密 bin（离线缓存），不存明文游戏文件
+// 游戏远程拉取管理器：版本对比 → 下载 → 校验 → 解密 → 解压到临时目录
+// 磁盘上存加密 bin（离线缓存）+ 运行时临时目录（file:// 加载，退出时删除）
 final class GameLauncher: NSObject {
     // 回调
     var onStatus: ((String, String) -> Void)?
@@ -29,19 +29,17 @@ final class GameLauncher: NSObject {
     }
     private var versionFile: URL { cacheDir.appendingPathComponent("version.txt") }
 
-    // 内存中的游戏文件字典（解密解压后存在这里，WebView 从这里读）
-    private(set) var gameFiles: [String: Data] = [:]
+    // 运行时临时目录（解密解压后的明文游戏文件，file:// 加载，退出时删除）
+    private var gameDir: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("zhulaile_game", isDirectory: true)
+    }
+
+    // 游戏 index.html 的 URL（供 WebView 加载）
+    var gameIndexURL: URL { gameDir.appendingPathComponent("index.html") }
 
     // 下载进度
     private var lastProgressTime = Date()
     private var lastProgressBytes: Double = 0
-
-    /// 从内存字典获取文件内容（供 WKURLSchemeHandler 调用）
-    func getFile(_ path: String) -> Data? {
-        var key = path
-        if key.hasPrefix("/") { key.removeFirst() }
-        return gameFiles[key]
-    }
 
     func launch() {
         let localVersionStr = (try? String(contentsOf: versionFile, encoding: .utf8)) ?? "无"
@@ -150,7 +148,7 @@ final class GameLauncher: NSObject {
         }
     }
 
-    // MARK: - 从磁盘加密 bin 解密解压到内存
+    // MARK: - 从磁盘加密 bin 解密解压到临时目录
 
     private func loadFromCache(version: Int) throws {
         guard let binFile = findLocalBin() else {
@@ -165,12 +163,21 @@ final class GameLauncher: NSObject {
         let sealed = try AES.GCM.SealedBox(combined: binData)
         let zipData = try AES.GCM.open(sealed, using: aesKey())
 
-        onStatus?("正在加载到内存…", "加载中")
-        gameFiles = try ZipExtractor.extractToMemory(zipData: zipData)
-        guard gameFiles["index.html"] != nil else {
+        onStatus?("正在解压到临时目录…", "加载中")
+        // 先清理旧的临时目录
+        let fm = FileManager.default
+        try? fm.removeItem(at: gameDir)
+        try fm.createDirectory(at: gameDir, withIntermediateDirectories: true)
+        try ZipExtractor.extract(zipData: zipData, to: gameDir)
+        guard fm.fileExists(atPath: gameIndexURL.path) else {
             throw NSError(domain: "GameLauncher", code: 3,
                           userInfo: [NSLocalizedDescriptionKey: "游戏包格式错误"])
         }
+    }
+
+    /// 退出时清理临时目录（明文游戏文件）
+    func cleanup() {
+        try? FileManager.default.removeItem(at: gameDir)
     }
 
     private func findLocalBin() -> URL? {
