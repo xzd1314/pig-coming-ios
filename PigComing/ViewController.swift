@@ -9,11 +9,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     var serverPort: UInt16 = 8765
     let gameLauncher = GameLauncher()
     private var launcherHandled = false
-    private let webServer = GCDWebServer()
+    private var webServer: LocalHTTPServer?
     private var webServerPort: UInt16 = 0
 
     deinit {
-        webServer.stop()
+        webServer?.stop()
         gameLauncher.cleanup()
     }
 
@@ -93,56 +93,12 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func startWebServer() {
-        // 用 GCDWebServer 启动本地 HTTP 服务器，从 Caches 目录提供游戏文件
+        // 用本地 HTTP 服务器从 Caches 目录提供游戏文件
         // 这样 WKWebView 就像加载普通网页一样，子资源（JS/CSS/图片/音频）完全正常
-        let gameDir = gameLauncher.gameDir
-        webServer.addHandler(forMethod: "GET", path: nil, request: GCDWebServerRequest.self) { request in
-            let path = request.path
-            let filePath = gameDir.appendingPathComponent(path).standardizedFileURL
-            // 安全检查：确保文件在 gameDir 目录内
-            guard filePath.path.hasPrefix(gameDir.path) else {
-                return GCDWebServerResponse(statusCode: 403)
-            }
-            guard FileManager.default.fileExists(atPath: filePath.path) else {
-                return GCDWebServerResponse(statusCode: 404)
-            }
-            if let data = try? Data(contentsOf: filePath) {
-                let mimeType = self.mimeType(for: filePath.pathExtension)
-                return GCDWebServerDataResponse(data: data, contentType: mimeType)
-            }
-            return GCDWebServerResponse(statusCode: 500)
-        }
-        do {
-            try webServer.start(options: [
-                GCDWebServerOption_Port: 8765,
-                GCDWebServerOption_BindToLocalhost: true
-            ])
-            webServerPort = webServer.port
-            print("[WebServer] started on port \(webServerPort)")
-        } catch {
-            print("[WebServer] failed to start: \(error)")
-        }
-    }
-
-    private func mimeType(for ext: String) -> String {
-        switch ext.lowercased() {
-        case "html", "htm": return "text/html; charset=utf-8"
-        case "js": return "application/javascript; charset=utf-8"
-        case "css": return "text/css; charset=utf-8"
-        case "json": return "application/json; charset=utf-8"
-        case "png": return "image/png"
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "svg": return "image/svg+xml"
-        case "mp3": return "audio/mpeg"
-        case "wav": return "audio/wav"
-        case "ogg": return "audio/ogg"
-        case "mp4": return "video/mp4"
-        case "webm": return "video/webm"
-        case "woff": return "font/woff"
-        case "woff2": return "font/woff2"
-        case "ttf": return "font/ttf"
-        default: return "application/octet-stream"
+        let server = LocalHTTPServer(gameDir: gameLauncher.gameDir)
+        if server.start() {
+            webServer = server
+            webServerPort = server.port
         }
     }
 
