@@ -9,9 +9,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     var serverPort: UInt16 = 8765
     let gameLauncher = GameLauncher()
     private var launcherHandled = false
+    private let webServer = GCDWebServer()
+    private var webServerPort: UInt16 = 0
 
     deinit {
-        // 退出时清理临时目录（明文游戏文件）
+        webServer.stop()
         gameLauncher.cleanup()
     }
 
@@ -19,6 +21,7 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         super.viewDidLoad()
         setupWebView()
         setupCallbacks()
+        startWebServer()
         loadGame()
     }
 
@@ -83,9 +86,63 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadGame() {
-        // 测试版本：直接加载 app bundle 里的游戏（验证按钮和音频问题）
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "assets") {
+        // 先加载启动页（空壳内置），GameLauncher 完成后再加载本地游戏
+        if let url = Bundle.main.url(forResource: "launcher", withExtension: "html", subdirectory: "assets") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    private func startWebServer() {
+        // 用 GCDWebServer 启动本地 HTTP 服务器，从 Caches 目录提供游戏文件
+        // 这样 WKWebView 就像加载普通网页一样，子资源（JS/CSS/图片/音频）完全正常
+        let gameDir = gameLauncher.gameDir
+        webServer.addHandler(forMethod: "GET", path: nil, request: GCDWebServerRequest.self) { request in
+            let path = request.path
+            let filePath = gameDir.appendingPathComponent(path).standardizedFileURL
+            // 安全检查：确保文件在 gameDir 目录内
+            guard filePath.path.hasPrefix(gameDir.path) else {
+                return GCDWebServerResponse(statusCode: 403)
+            }
+            guard FileManager.default.fileExists(atPath: filePath.path) else {
+                return GCDWebServerResponse(statusCode: 404)
+            }
+            if let data = try? Data(contentsOf: filePath) {
+                let mimeType = self.mimeType(for: filePath.pathExtension)
+                return GCDWebServerDataResponse(data: data, contentType: mimeType)
+            }
+            return GCDWebServerResponse(statusCode: 500)
+        }
+        do {
+            try webServer.start(options: [
+                GCDWebServerOption_Port: 8765,
+                GCDWebServerOption_BindToLocalhost: true
+            ])
+            webServerPort = webServer.port
+            print("[WebServer] started on port \(webServerPort)")
+        } catch {
+            print("[WebServer] failed to start: \(error)")
+        }
+    }
+
+    private func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "html", "htm": return "text/html; charset=utf-8"
+        case "js": return "application/javascript; charset=utf-8"
+        case "css": return "text/css; charset=utf-8"
+        case "json": return "application/json; charset=utf-8"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "svg": return "image/svg+xml"
+        case "mp3": return "audio/mpeg"
+        case "wav": return "audio/wav"
+        case "ogg": return "audio/ogg"
+        case "mp4": return "video/mp4"
+        case "webm": return "video/webm"
+        case "woff": return "font/woff"
+        case "woff2": return "font/woff2"
+        case "ttf": return "font/ttf"
+        default: return "application/octet-stream"
         }
     }
 
@@ -125,9 +182,11 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadLocalGame() {
-        // 用 file:// 加载临时目录里的游戏文件（和原 IPA 一致，兼容性最好）
-        let indexURL = gameLauncher.gameIndexURL
-        webView.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
+        // 用本地 HTTP 服务器加载游戏（http://localhost:port/）
+        // 这样 WKWebView 就像加载普通网页一样，子资源完全正常
+        if let url = URL(string: "http://127.0.0.1:\(webServerPort)/index.html") {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     private func jsString(_ s: String) -> String {

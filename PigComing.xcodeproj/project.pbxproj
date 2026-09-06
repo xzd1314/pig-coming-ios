@@ -14,6 +14,11 @@
 		A100000500000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000500000000000005 /* Assets.xcassets */; };
 		A100000600000000000006 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = A200000600000000000006 /* assets */; };
 		A100002000000000000020 /* GameLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002000000000000020 /* GameLauncher.swift */; };
+		AA3000002 /* GCDWebServer.m in Sources */ = {isa = PBXBuildFile; fileRef = AA3000002; };
+		AA3000004 /* GCDWebServerConnection.m in Sources */ = {isa = PBXBuildFile; fileRef = AA3000004; };
+		AA3000006 /* GCDWebServerFunctions.m in Sources */ = {isa = PBXBuildFile; fileRef = AA3000006; };
+		AA3000008 /* GCDWebServerRequest.m in Sources */ = {isa = PBXBuildFile; fileRef = AA3000008; };
+		AA300000A /* GCDWebServerResponse.m in Sources */ = {isa = PBXBuildFile; fileRef = AA300000A; };
 		A100002200000000000022 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002200000000000022 /* SceneDelegate.swift */; };
 		A100002100000000000021 /* ZipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002100000000000021 /* ZipExtractor.swift */; };
 /* End PBXBuildFile section */
@@ -28,7 +33,34 @@
 		A200000700000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000800000000000008 /* PigComing.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PigComing.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200002000000000000020 /* GameLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLauncher.swift; sourceTree = "<group>"; };
+		AA3000001 /* GCDWebServer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServer.h; sourceTree = "<group>"; };
+		AA3000002 /* GCDWebServer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GCDWebServer.m; sourceTree = "<group>"; };
+		AA3000003 /* GCDWebServerConnection.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerConnection.h; sourceTree = "<group>"; };
+		AA3000004 /* GCDWebServerConnection.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GCDWebServerConnection.m; sourceTree = "<group>"; };
+		AA3000005 /* GCDWebServerFunctions.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerFunctions.h; sourceTree = "<group>"; };
+		AA3000006 /* GCDWebServerFunctions.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GCDWebServerFunctions.m; sourceTree = "<group>"; };
+		AA3000007 /* GCDWebServerRequest.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerRequest.h; sourceTree = "<group>"; };
+		AA3000008 /* GCDWebServerRequest.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GCDWebServerRequest.m; sourceTree = "<group>"; };
+		AA3000009 /* GCDWebServerResponse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerResponse.h; sourceTree = "<group>"; };
+		AA300000A /* GCDWebServerResponse.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = GCDWebServerResponse.m; sourceTree = "<group>"; };
+		AA300000B /* GCDWebServerHTTPStatusCodes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerHTTPStatusCodes.h; sourceTree = "<group>"; };
+		AA300000C /* GCDWebServerPrivate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GCDWebServerPrivate.h; sourceTree = "<group>"; };
+		AA300000D /* PigComing-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PigComing-Bridging-Header.h; sourceTree = "<group>"; };
 		A200002200000000000022 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		A400000100000000000001 /* GCDWebServer */ = {isa = PBXGroup; children = (
+				AA3000001 /* GCDWebServer.h */,
+				AA3000002 /* GCDWebServer.m */,
+				AA3000003 /* GCDWebServerConnection.h */,
+				AA3000004 /* GCDWebServerConnection.m */,
+				AA3000005 /* GCDWebServerFunctions.h */,
+				AA3000006 /* GCDWebServerFunctions.m */,
+				AA3000007 /* GCDWebServerRequest.h */,
+				AA3000008 /* GCDWebServerRequest.m */,
+				AA3000009 /* GCDWebServerResponse.h */,
+				AA300000A /* GCDWebServerResponse.m */,
+				AA300000B /* GCDWebServerHTTPStatusCodes.h */,
+				AA300000C /* GCDWebServerPrivate.h */,
+			); path = GCDWebServer; sourceTree = "<group>"; };
 		A200002100000000000021 /* ZipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -60,6 +92,8 @@
 				A200000400000000000004 /* UdpManager.swift */,
 				A200002000000000000020 /* GameLauncher.swift */,
 				A200002200000000000022 /* SceneDelegate.swift */,
+				A400000100000000000001 /* GCDWebServer */,
+				AA300000D /* PigComing-Bridging-Header.h */,
 				A200002100000000000021 /* ZipExtractor.swift */,
 				A200000500000000000005 /* Assets.xcassets */,
 				A200000600000000000006 /* assets */,
@@ -152,6 +186,11 @@
 				A100000400000000000004 /* UdpManager.swift in Sources */,
 				A100002000000000000020 /* GameLauncher.swift in Sources */,
 				A100002200000000000022 /* SceneDelegate.swift in Sources */,
+				AA3000002 /* GCDWebServer.m in Sources */,
+				AA3000004 /* GCDWebServerConnection.m in Sources */,
+				AA3000006 /* GCDWebServerFunctions.m in Sources */,
+				AA3000008 /* GCDWebServerRequest.m in Sources */,
+				AA300000A /* GCDWebServerResponse.m in Sources */,
 				A100002100000000000021 /* ZipExtractor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -294,6 +333,7 @@
 				MARKETING_VERSION = V11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.xzd.pigcoming;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "PigComing/PigComing-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -322,6 +362,7 @@
 				MARKETING_VERSION = V11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.xzd.pigcoming;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "PigComing/PigComing-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
