@@ -7,28 +7,23 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     let udpManager = UdpManager()
     var isHost = false
     var serverPort: UInt16 = 8765
-    let gameLauncher = GameLauncher()
-    private var launcherHandled = false
-    private var webServer: LocalHTTPServer?
-    private var webServerPort: UInt16 = 0
 
     deinit {
-        webServer?.stop()
-        gameLauncher.cleanup()
+        wsServer.stop()
+        udpManager.stop()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         setupWebView()
         setupCallbacks()
-        startWebServer()
         loadGame()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // WebView 撑满整个 view（和原 IPA 一致）
-        webView.frame = view.bounds
+        // WebView 撑满整个屏幕（忽略安全区域，修复黑边）
+        webView.frame = UIScreen.main.bounds
     }
 
     private func setupWebView() {
@@ -41,19 +36,18 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
 
-        webView = WKWebView(frame: view.bounds, configuration: config)
+        // 用屏幕尺寸创建 WebView，忽略安全区域（修复黑边）
+        webView = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         webView.navigationDelegate = self
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        webView.isOpaque = false
+        webView.isOpaque = true
         webView.backgroundColor = .black
         webView.isUserInteractionEnabled = true
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        // 忽略安全区域
         if #available(iOS 11.0, *) {
             webView.scrollView.contentInsetAdjustmentBehavior = .never
-        }
-        if #available(iOS 16.4, *) {
-            webView.isInspectable = true
         }
         view.addSubview(webView)
     }
@@ -86,63 +80,16 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadGame() {
-        // 先加载启动页（空壳内置），GameLauncher 完成后再加载本地游戏
-        if let url = Bundle.main.url(forResource: "launcher", withExtension: "html", subdirectory: "assets") {
+        // 直接加载 app bundle 里的游戏（和原 IPA 一致，兼容性最好）
+        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "assets") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
     }
 
-    private func startWebServer() {
-        // 用本地 HTTP 服务器从 Caches 目录提供游戏文件
-        // 这样 WKWebView 就像加载普通网页一样，子资源（JS/CSS/图片/音频）完全正常
-        let server = LocalHTTPServer(gameDir: gameLauncher.gameDir)
-        if server.start() {
-            webServer = server
-            webServerPort = server.port
-        }
-    }
-
-    // MARK: - 启动页 → GameLauncher
+    // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard !launcherHandled, webView.url?.lastPathComponent == "launcher.html" else { return }
-        launcherHandled = true
-        setupGameLauncher()
-        gameLauncher.launch()
-    }
-
-    private func setupGameLauncher() {
-        gameLauncher.onStatus = { [weak self] text, tag in
-            self?.jsSafe("setStatus('\(self?.jsString(text) ?? "")', '\(self?.jsString(tag) ?? "")')")
-        }
-        gameLauncher.onProgress = { [weak self] percent, downloaded, total, speed in
-            self?.jsSafe("updateProgress(\(percent), \(downloaded), \(total), \(speed))")
-        }
-        gameLauncher.onLatestVersion = { [weak self] v in
-            self?.jsSafe("setLatestVersion('\(self?.jsString(v) ?? "")')")
-        }
-        gameLauncher.onLocalVersion = { [weak self] v in
-            self?.jsSafe("setLocalVersion('\(self?.jsString(v) ?? "")')")
-        }
-        gameLauncher.onPackSize = { [weak self] mb in
-            self?.jsSafe("setPackSize(\(mb))")
-        }
-        gameLauncher.onError = { [weak self] msg in
-            self?.jsSafe("setError('\(self?.jsString(msg) ?? "")')")
-        }
-        gameLauncher.onComplete = { [weak self] in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                self?.loadLocalGame()
-            }
-        }
-    }
-
-    private func loadLocalGame() {
-        // 用本地 HTTP 服务器加载游戏（http://localhost:port/）
-        // 这样 WKWebView 就像加载普通网页一样，子资源完全正常
-        if let url = URL(string: "http://127.0.0.1:\(webServerPort)/index.html") {
-            webView.load(URLRequest(url: url))
-        }
+        // 游戏加载完成
     }
 
     private func jsString(_ s: String) -> String {
