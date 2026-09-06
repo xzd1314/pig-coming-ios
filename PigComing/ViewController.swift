@@ -99,7 +99,6 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func setupGameLauncher() {
-        gameSchemeHandler.gameLauncher = gameLauncher
         gameLauncher.onStatus = { [weak self] text, tag in
             self?.jsSafe("setStatus('\(self?.jsString(text) ?? "")', '\(self?.jsString(tag) ?? "")')")
         }
