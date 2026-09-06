@@ -15,18 +15,30 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         gameLauncher.cleanup()
     }
 
-    // 重写 loadView，把 WebView 直接作为 view，自动撑满 window，不受安全区域限制
-    override func loadView() {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupWebView()
+        setupCallbacks()
+        loadGame()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // WebView 撑满整个 view（和原 IPA 一致）
+        webView.frame = view.bounds
+    }
+
+    private func setupWebView() {
         let config = WKWebViewConfiguration()
         let userController = WKUserContentController()
         userController.add(self, name: "bridge")
         config.userContentController = userController
-        // 用 file:// 加载本地临时目录里的游戏文件（和原 IPA 一致，兼容性最好）
+        // 用 file:// 加载本地临时目录里的游戏文件（和原 IPA 一致）
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
 
-        webView = WKWebView(frame: UIScreen.main.bounds, configuration: config)
+        webView = WKWebView(frame: view.bounds, configuration: config)
         webView.navigationDelegate = self
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.isOpaque = false
@@ -34,25 +46,13 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         webView.isUserInteractionEnabled = true
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        webView.contentMode = .scaleToFill
         if #available(iOS 11.0, *) {
             webView.scrollView.contentInsetAdjustmentBehavior = .never
         }
         if #available(iOS 16.4, *) {
             webView.isInspectable = true
         }
-        self.view = webView
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupCallbacks()
-        loadGame()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // WebView 就是 view，自动撑满，不需要手动设置 frame
+        view.addSubview(webView)
     }
 
     private func setupCallbacks() {
