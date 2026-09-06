@@ -22,12 +22,7 @@ class LocalHTTPServer {
             }
             listener?.start(queue: DispatchQueue(label: "LocalHTTPServer"))
             // 等待端口分配
-            let sem = DispatchSemaphore(value: 0)
-            listener?.stateUpdateHandler = { state: NWListener.State in
-                if case .ready = state { sem.signal() }
-                if case .failed = state { sem.signal() }
-            }
-            _ = sem.wait(timeout: .now() + 2)
+            Thread.sleep(forTimeInterval: 0.5)
             port = listener?.port?.rawValue ?? 0
             print("[LocalHTTPServer] started on port \(port)")
             return port > 0
