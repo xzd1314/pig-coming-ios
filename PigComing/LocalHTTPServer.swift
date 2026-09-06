@@ -13,23 +13,33 @@ class LocalHTTPServer {
     }
 
     func start() -> Bool {
-        do {
-            let params = NWParameters.tcp
-            params.includePeerToPeer = false
-            listener = try NWListener(using: params, on: .any)
-            listener?.newConnectionHandler = { [weak self] connection in
-                self?.handleConnection(connection)
+        // 尝试固定端口 8765，失败则用随机端口
+        var usedPort: UInt16 = 8765
+        for attempt in 0..<3 {
+            do {
+                let params = NWParameters.tcp
+                params.includePeerToPeer = false
+                let testPort = NWEndpoint.Port(rawValue: usedPort)!
+                listener = try NWListener(using: params, on: testPort)
+                listener?.newConnectionHandler = { [weak self] connection in
+                    self?.handleConnection(connection)
+                }
+                listener?.start(queue: DispatchQueue(label: "LocalHTTPServer"))
+                // 等待端口分配
+                Thread.sleep(forTimeInterval: 1.0)
+                port = listener?.port?.rawValue ?? 0
+                if port > 0 {
+                    print("[LocalHTTPServer] started on port \(port)")
+                    return true
+                }
+                listener?.cancel()
+                listener = nil
+            } catch {
+                print("[LocalHTTPServer] port \(usedPort) failed: \(error)")
             }
-            listener?.start(queue: DispatchQueue(label: "LocalHTTPServer"))
-            // 等待端口分配
-            Thread.sleep(forTimeInterval: 0.5)
-            port = listener?.port?.rawValue ?? 0
-            print("[LocalHTTPServer] started on port \(port)")
-            return port > 0
-        } catch {
-            print("[LocalHTTPServer] failed: \(error)")
-            return false
+            usedPort = 0  // 下次用随机端口
         }
+        return false
     }
 
     func stop() {
@@ -39,7 +49,8 @@ class LocalHTTPServer {
 
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: DispatchQueue(label: "LocalHTTPServer.conn"))
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
+        // 增大缓冲区，确保能读取完整的 HTTP 请求头
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self, let data = data, !data.isEmpty else {
                 connection.cancel()
                 return
@@ -79,7 +90,7 @@ class LocalHTTPServer {
         }
 
         let mime = mimeType(for: filePath.pathExtension)
-        let header = "HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(data.count)\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: \(mime)\r\nContent-Length: \(data.count)\r\nConnection: close\r\nCache-Control: no-cache\r\nAccept-Ranges: none\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
         var response = header.data(using: .utf8)!
         response.append(data)
         connection.send(content: response, completion: .contentProcessed { _ in
@@ -97,7 +108,7 @@ class LocalHTTPServer {
     private func mimeType(for ext: String) -> String {
         switch ext.lowercased() {
         case "html", "htm": return "text/html; charset=utf-8"
-        case "js": return "application/javascript; charset=utf-8"
+        case "js": return "text/javascript; charset=utf-8"
         case "css": return "text/css; charset=utf-8"
         case "json": return "application/json; charset=utf-8"
         case "png": return "image/png"
