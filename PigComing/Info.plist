@@ -84,11 +84,6 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要本地网络权限以进行局域网联机游戏</string>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
