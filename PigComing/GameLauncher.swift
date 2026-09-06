@@ -29,9 +29,11 @@ final class GameLauncher: NSObject {
     }
     private var versionFile: URL { cacheDir.appendingPathComponent("version.txt") }
 
-    // 运行时临时目录（解密解压后的明文游戏文件，file:// 加载，退出时删除）
+    // 运行时游戏目录（解密解压后的明文游戏文件，file:// 加载，退出时删除）
+    // 用 Caches 目录而不是临时目录，权限更稳定，WKWebView 能正常加载子资源
     private var gameDir: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("zhulaile_game", isDirectory: true)
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("zhulaile_game", isDirectory: true)
     }
 
     // 游戏 index.html 的 URL（供 WebView 加载）
