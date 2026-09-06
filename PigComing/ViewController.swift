@@ -83,8 +83,8 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func loadGame() {
-        // 先加载启动页（空壳内置），GameLauncher 完成后再加载本地游戏
-        if let url = Bundle.main.url(forResource: "launcher", withExtension: "html", subdirectory: "assets") {
+        // 测试版本：直接加载 app bundle 里的游戏（验证按钮和音频问题）
+        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "assets") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
     }

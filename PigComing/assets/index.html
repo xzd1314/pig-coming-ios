@@ -1,0 +1,1201 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>猪来了nextbot</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
+  /* 所有菜单/弹窗界面允许触摸滚动，适配小屏幕 */
+  #startScreen, #gameOverScreen, #modeSelectScreen, #playerSelectScreen, #srtSubMenu, #srtMultiLobby, #aboutScreen, #settingsPanel, #multiplayerScreen, #nameDialog, #ipDialog {
+    touch-action: pan-y; -webkit-overflow-scrolling: touch;
+  }
+  #gameCanvas { display: none; width: 100%; height: 100%; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 18px; height: 18px; pointer-events: none; z-index: 10;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.85);
+  }
+  #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
+  #crosshair::after { left: 50%; top: 0; height: 100%; width: 2px; transform: translateX(-50%); }
+  #hud {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    color: #fff; font-size: 22px; font-weight: bold; z-index: 10;
+    text-shadow: 0 0 8px #000, 0 0 4px #000; pointer-events: none; letter-spacing: 2px;
+  }
+
+  #srtHealthBar {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    width: 280px; max-width: 80vw; z-index: 10; display: none;
+    text-align: center;
+  }
+  #srtHealthBar .srt-name {
+    color: #ffaa00; font-size: 14px; font-weight: bold; margin-bottom: 4px;
+    text-shadow: 0 0 6px #000;
+  }
+  #srtHealthBar .srt-hp-bg {
+    width: 100%; height: 14px; background: rgba(0,0,0,0.7);
+    border: 2px solid #555; border-radius: 7px; overflow: hidden;
+  }
+  #srtHealthBar .srt-hp-fill {
+    height: 100%; background: linear-gradient(90deg, #ff4444, #ff8844);
+    transition: width 0.2s; width: 100%;
+  }
+  #srtHealthBar .srt-hp-text {
+    color: #fff; font-size: 11px; margin-top: 2px;
+    text-shadow: 0 0 4px #000;
+  }
+
+  #distance {
+    position: fixed; top: 38px; left: 50%; transform: translateX(-50%);
+    color: #ff4444; font-size: 13px; z-index: 10;
+    text-shadow: 0 0 6px #000; pointer-events: none;
+  }
+  #settingsBtn {
+    position: fixed; top: 12px; right: 12px; width: 44px; height: 44px;
+    border-radius: 50%; background: rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.4);
+    color: #fff; font-size: 22px; z-index: 30;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; touch-action: none;
+  }
+  #settingsBtn:active { background: rgba(255,255,255,0.2); }
+  #settingsPanel {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.88); z-index: 100;
+    display: none; flex-direction: column; align-items: center; color: #fff;
+    overflow-y: auto; overflow-x: hidden;
+    padding: max(16px, env(safe-area-inset-top)) 10px max(20px, env(safe-area-inset-bottom));
+  }
+  #settingsPanel > * { flex-shrink: 0; }
+  #settingsPanel h2 { font-size: clamp(20px, 6vw, 28px); margin-bottom: 16px; margin-top: 8px; color: #ff6666; letter-spacing: 2px; }
+  .setting-row {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 300px; max-width: 90vw; padding: 12px 18px; margin-bottom: 8px;
+    background: rgba(255,255,255,0.08); border-radius: 8px; font-size: 16px;
+  }
+  .setting-row label { flex: 1; }
+  .setting-row .slider-val { color: #ff6666; font-weight: bold; min-width: 24px; text-align: right; }
+  input[type=range] {
+    -webkit-appearance: none; width: 120px; height: 6px; border-radius: 3px;
+    background: #444; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: #cc2222; cursor: pointer; border: 2px solid #fff;
+  }
+  .toggle {
+    width: 52px; height: 28px; border-radius: 14px; background: #444;
+    position: relative; cursor: pointer; transition: background 0.2s; flex-shrink: 0;
+  }
+  .toggle.on { background: #cc2222; }
+  .toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: left 0.2s;
+  }
+  .toggle.on::after { left: 27px; }
+  .toggle.disabled { opacity: 0.6; cursor: not-allowed; }
+  #closeSettingsBtn {
+    margin-top: 18px; padding: 12px 40px; font-size: 18px; font-weight: bold;
+    background: #cc1111; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+  #closeSettingsBtn:active { background: #ff2222; }
+  #returnMenuBtn {
+    margin-top: 10px; padding: 10px 30px; font-size: 15px;
+    background: transparent; color: #aaa; border: 1px solid #666; border-radius: 8px; cursor: pointer;
+    margin-bottom: 20px;
+  }
+  #returnMenuBtn:active { background: rgba(255,255,255,0.1); }
+  #joystickBase {
+    position: fixed; bottom: 36px; left: 36px; width: 110px; height: 110px;
+    border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.25);
+    z-index: 20; touch-action: none;
+  }
+  #joystickKnob {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 46px; height: 46px; border-radius: 50%;
+    background: rgba(255,255,255,0.45); border: 2px solid rgba(255,255,255,0.55);
+  }
+  #btnGroup {
+    position: fixed; bottom: 40px; right: 30px; z-index: 20;
+    display: flex; flex-direction: row; align-items: flex-end; gap: 14px;
+  }
+  #jumpBtn {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: rgba(60,160,255,0.35); border: 3px solid rgba(80,180,255,0.6);
+    color: #fff; font-size: 14px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none; text-shadow: 0 0 4px #000; cursor: pointer;
+  }
+  #jumpBtn:active { background: rgba(60,160,255,0.65); }
+  #sprintBtn {
+    width: 82px; height: 82px; border-radius: 50%;
+    background: rgba(255,60,60,0.35); border: 3px solid rgba(255,80,80,0.6);
+    color: #fff; font-size: 15px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none; text-shadow: 0 0 4px #000; cursor: pointer;
+  }
+  #sprintBtn:active { background: rgba(255,60,60,0.65); }
+  #sprintBtn.cooldown { background: rgba(100,100,100,0.35); border-color: rgba(150,150,150,0.5); }
+  /* 打猪模式 - 挥刀按钮 */
+  #attackBtn {
+    width: 82px; height: 82px; border-radius: 50%;
+    background: rgba(255,140,0,0.4); border: 3px solid rgba(255,160,0,0.7);
+    color: #fff; font-size: 14px; font-weight: bold;
+    display: none; align-items: center; justify-content: center;
+    touch-action: none; text-shadow: 0 0 4px #000; cursor: pointer;
+  }
+  #attackBtn:active { background: rgba(255,140,0,0.7); }
+  /* 打猪模式 - 物品栏 */
+  #hotbar {
+    position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 8px; z-index: 20;
+  }
+  .hotbar-slot {
+    width: 56px; height: 56px; border-radius: 8px;
+    background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.3);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+  }
+  .hotbar-slot.active { border-color: #ff8800; box-shadow: 0 0 12px rgba(255,140,0,0.6); }
+  /* 商店道具槽：emoji图标 */
+  .hotbar-slot.emoji-slot {
+    font-size: 30px; line-height: 1;
+    background: rgba(20,20,40,0.75);
+  }
+  /* 血量条 */
+  #healthBarContainer {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 18px; background: rgba(0,0,0,0.6); border-radius: 9px;
+    border: 2px solid rgba(255,255,255,0.3); z-index: 10; display: none; overflow: hidden;
+  }
+  #healthBar {
+    height: 100%; width: 100%; background: linear-gradient(90deg, #cc1111, #ff4444);
+    transition: width 0.2s; border-radius: 7px;
+  }
+  #healthText {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #fff; font-size: 11px; font-weight: bold; text-shadow: 0 0 3px #000;
+  }
+  /* 猪血量 */
+  #pigHealthBarContainer {
+    position: fixed; top: 84px; left: 50%; transform: translateX(-50%);
+    width: 160px; height: 14px; background: rgba(0,0,0,0.6); border-radius: 7px;
+    border: 2px solid rgba(255,255,255,0.3); z-index: 10; display: none; overflow: hidden;
+  }
+  #pigHealthBar {
+    height: 100%; width: 100%; background: linear-gradient(90deg, #e8a0a0, #f0c0c0);
+    transition: width 0.2s; border-radius: 5px;
+  }
+  #pigHealthText {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #333; font-size: 10px; font-weight: bold;
+  }
+  /* 黑猪模式状态提示 */
+  #blackpigStatus {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 48px; font-weight: bold; z-index: 15; pointer-events: none;
+    text-shadow: 0 0 16px #000, 0 0 8px #000; display: none; letter-spacing: 4px;
+  }
+  #blackpigStatus.watching { color: #ff2222; animation: pulse 0.5s infinite; }
+  #blackpigStatus.notwatching { color: #44ff44; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.5;} }
+  /* 罚站提示 */
+  #punishOverlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(255,0,0,0.4); z-index: 50; display: none;
+    pointer-events: none;
+  }
+  /* ===== 主菜单 ===== */
+  #startScreen, #gameOverScreen, #modeSelectScreen, #playerSelectScreen, #srtSubMenu, #srtMultiLobby, #aboutScreen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.88); z-index: 100;
+    display: flex; flex-direction: column; align-items: center; color: #fff;
+    overflow-y: auto; overflow-x: hidden;
+    padding: max(20px, env(safe-area-inset-top)) 10px max(20px, env(safe-area-inset-bottom));
+    justify-content: flex-start;
+  }
+  #startScreen > *, #gameOverScreen > *, #modeSelectScreen > * { flex-shrink: 0; }
+  #startScreen, #playerSelectScreen, #modeSelectScreen, #srtSubMenu, #srtMultiLobby, #aboutScreen, #gameOverScreen { z-index: 100; }
+  #startScreen { justify-content: flex-start; }
+  #startScreen h1 { font-size: clamp(32px, 10vw, 52px); color: #ff3333; margin-bottom: 6px; text-shadow: 0 0 24px #ff0000; letter-spacing: 4px; margin-top: auto; }
+  #startScreen .subtitle { font-size: 14px; color: #888; margin-bottom: 20px; letter-spacing: 6px; }
+  #startScreen .version-tag { font-size: 12px; color: #555; margin-bottom: 30px; letter-spacing: 2px; }
+  #startScreen #aboutBtn { margin-bottom: auto; }
+  .menu-btn {
+    width: min(220px, 80vw); padding: 14px 0; font-size: clamp(16px, 5vw, 20px); font-weight: bold;
+    border: none; border-radius: 10px; cursor: pointer; margin-bottom: 14px;
+    transition: transform 0.1s, box-shadow 0.2s;
+  }
+  .menu-btn:active { transform: scale(0.96); }
+  #startBtn {
+    background: linear-gradient(135deg, #cc1111, #ff3333); color: #fff;
+    box-shadow: 0 0 24px rgba(255,0,0,0.4);
+  }
+  #startBtn:active { background: linear-gradient(135deg, #ff2222, #ff4444); }
+  #aboutBtn {
+    background: linear-gradient(135deg, #333, #555); color: #ddd;
+    box-shadow: 0 0 12px rgba(255,255,255,0.1);
+  }
+  #aboutBtn:active { background: linear-gradient(135deg, #444, #666); }
+  /* 模式选择 */
+  #playerSelectScreen { display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 30px; padding-top: 40px; }
+  #playerSelectScreen h2 { font-size: clamp(22px, 7vw, 32px); color: #ff5555; margin-bottom: 10px; letter-spacing: 3px; margin-top: auto; }
+  .player-select-container { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; margin-bottom: auto; }
+  .player-select-card { width: 200px; height: 260px; border-radius: 16px; background-size: cover; background-position: center; cursor: pointer; position: relative; overflow: hidden; border: 3px solid #444; transition: all 0.2s; }
+  .player-select-card:active { transform: scale(0.95); border-color: #ff5555; }
+  .player-select-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.7) 100%); }
+  .player-select-text { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; color: #fff; font-size: 24px; font-weight: bold; letter-spacing: 2px; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+  #modeSelectScreen { display: none; }
+  #modeSelectScreen h2 { font-size: clamp(22px, 7vw, 32px); color: #ff5555; margin-bottom: 20px; letter-spacing: 3px; margin-top: 10px; }
+  .mode-cards { display: flex; flex-direction: column; gap: 14px; width: 280px; max-width: 90vw; }
+  .mode-card {
+    display: flex; align-items: center; padding: 12px; border-radius: 12px;
+    background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.15);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .mode-card:active { transform: scale(0.97); border-color: #ff4444; }
+  .mode-card .mode-cover {
+    width: 64px; height: 64px; border-radius: 8px; flex-shrink: 0;
+    background-size: cover; background-position: center; margin-right: 14px;
+  }
+  .mode-card .mode-info { flex: 1; }
+  .mode-card .mode-name { font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 4px; }
+  .mode-card .mode-desc { font-size: 12px; color: #999; }
+
+  /* SRT模式 */
+  #srtSubMenu {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.92); z-index: 101;
+    display: none; flex-direction: column; align-items: center; justify-content: flex-start; color: #fff;
+    overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+    padding: max(20px, env(safe-area-inset-top)) 10px max(20px, env(safe-area-inset-bottom));
+  }
+  #srtSubMenu h2 { font-size: clamp(22px, 7vw, 32px); color: #ffaa00; margin-bottom: 24px; letter-spacing: 3px; margin-top: auto; }
+  #srtSubMenu .srt-option:last-child { margin-bottom: auto; }
+  .srt-option {
+    width: min(260px, 80vw); padding: 18px 0; margin-bottom: 14px;
+    font-size: clamp(16px, 5vw, 20px); font-weight: bold;
+    border: none; border-radius: 10px; cursor: pointer;
+    background: linear-gradient(135deg, #aa6600, #ffaa00); color: #fff;
+    box-shadow: 0 0 16px rgba(255,170,0,0.3);
+  }
+  .srt-option:active { transform: scale(0.96); }
+  .srt-option.secondary { background: linear-gradient(135deg, #444, #666); box-shadow: none; }
+  #srtPlayerCount { display: none; flex-direction: column; align-items: center; margin-top: 10px; }
+  #srtPlayerCount label { font-size: 16px; color: #aaa; margin-bottom: 10px; }
+  .count-selector { display: flex; gap: 8px; margin-bottom: 16px; }
+  .count-btn {
+    width: 44px; height: 44px; border-radius: 8px; border: 2px solid #555;
+    background: rgba(255,255,255,0.08); color: #fff; font-size: 18px; font-weight: bold; cursor: pointer;
+  }
+  .count-btn.active { border-color: #ffaa00; background: rgba(255,170,0,0.2); color: #ffaa00; }
+  #srtOKBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    padding: 20px 50px; font-size: 24px; font-weight: bold;
+    background: linear-gradient(135deg, #00aa00, #00ff00); color: #fff;
+    border: none; border-radius: 12px; cursor: pointer; z-index: 50;
+    box-shadow: 0 0 30px rgba(0,255,0,0.5); display: none;
+  }
+  #srtOKBtn:active { transform: translate(-50%, -50%) scale(0.95); }
+  #srtStatus {
+    position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+    color: #ffaa00; font-size: 16px; font-weight: bold; z-index: 10;
+    text-shadow: 0 0 8px #000; display: none; pointer-events: none;
+  }
+
+  #modeBackBtn {
+    margin-top: 20px; padding: 10px 24px; font-size: 15px;
+    background: transparent; color: #aaa; border: 1px solid #666; border-radius: 8px; cursor: pointer;
+  }
+  /* ===== 关于页面 ===== */
+  #aboutScreen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.92); z-index: 101;
+    display: none; flex-direction: column; align-items: center; color: #fff;
+    overflow-y: auto; padding: max(16px, env(safe-area-inset-top)) 10px 20px;
+  }
+  #aboutBackBtn {
+    position: fixed; top: 16px; left: 16px; padding: 10px 18px; font-size: 15px;
+    background: rgba(255,255,255,0.1); color: #ccc; border: 1px solid #555;
+    border-radius: 8px; cursor: pointer; z-index: 102;
+  }
+  #aboutBackBtn:active { background: rgba(255,255,255,0.2); }
+  #aboutScreen h2 { font-size: 32px; color: #ff5555; margin-bottom: 30px; letter-spacing: 3px; }
+  .about-row {
+    width: 320px; max-width: 90vw; padding: 14px 20px; margin-bottom: 12px;
+    background: rgba(255,255,255,0.06); border-radius: 8px;
+    display: flex; align-items: center; font-size: 16px;
+  }
+  .about-row .label { color: #888; width: 80px; flex-shrink: 0; }
+  .about-row .value { color: #fff; flex: 1; }
+  .about-row .value a { color: #66aaff; text-decoration: underline; cursor: pointer; word-break: break-all; }
+  #gameOverScreen { display: none; }
+  #gameOverScreen h1 { font-size: clamp(28px, 9vw, 46px); color: #ff0000; margin-bottom: 14px; text-shadow: 0 0 30px #ff0000; animation: pulse 1s infinite; margin-top: auto; }
+  #gameOverScreen .time-text { font-size: 22px; color: #fff; margin-bottom: 6px; }
+  #gameOverScreen .best-text { font-size: 15px; color: #888; margin-bottom: 22px; }
+  #gameOverScreen #backToMenuBtn { margin-bottom: auto; }
+  #restartBtn {
+    padding: 12px 40px; font-size: 18px; font-weight: bold;
+    background: #cc1111; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+  #restartBtn:active { background: #ff2222; }
+  #dangerOverlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 5; opacity: 0;
+    box-shadow: inset 0 0 120px 40px rgba(255,0,0,0.55); transition: opacity 0.12s;
+  }
+  #pauseLabel {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 36px; color: #fff; z-index: 99; display: none;
+    text-shadow: 0 0 16px #000; letter-spacing: 6px; pointer-events: none;
+  }
+  #gasOverlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 6; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(0,180,0,0.25) 100%);
+    transition: opacity 0.5s;
+  }
+  /* 攻击命中闪烁 */
+  #hitFlash {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 8; opacity: 0;
+    background: rgba(255,255,255,0.3); transition: opacity 0.1s;
+  }
+  /* ===== 联机菜单 ===== */
+  #multiplayerScreen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.92); z-index: 100;
+    display: none; flex-direction: column; color: #fff;
+    overflow-y: auto; overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  #mpTopBar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: max(16px, env(safe-area-inset-top)) 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.15);
+  }
+  #mpBackBtn {
+    padding: 8px 16px; font-size: 15px; background: rgba(255,255,255,0.1);
+    color: #ccc; border: 1px solid #555; border-radius: 8px; cursor: pointer;
+  }
+  #mpTitle { font-size: 22px; font-weight: bold; color: #ff5555; letter-spacing: 2px; }
+  #mpInputIPBtn {
+    padding: 8px 14px; font-size: 14px; background: rgba(60,120,255,0.3);
+    color: #88bbff; border: 1px solid #4477cc; border-radius: 8px; cursor: pointer;
+  }
+  #mpRoomList {
+    flex: 1; overflow-y: auto; padding: 16px;
+  }
+  .mp-room-item {
+    display: flex; align-items: center; padding: 14px 16px; margin-bottom: 10px;
+    background: rgba(255,255,255,0.06); border: 2px solid rgba(255,255,255,0.12);
+    border-radius: 10px; cursor: pointer; transition: all 0.15s;
+  }
+  .mp-room-item:active { transform: scale(0.97); border-color: #ff4444; }
+  .mp-room-info { flex: 1; }
+  .mp-room-host { font-size: 17px; font-weight: bold; color: #fff; margin-bottom: 4px; }
+  .mp-room-detail { font-size: 12px; color: #888; }
+  .mp-room-players { font-size: 14px; color: #ffaa44; font-weight: bold; }
+  #mpEmptyHint {
+    text-align: center; color: #666; font-size: 15px; padding: 60px 20px;
+  }
+  #mpScanIndicator {
+    text-align: center; color: #ff6666; font-size: 13px; padding: 8px;
+    animation: pulse 1s infinite;
+  }
+  /* 改名弹窗 */
+  #nameDialog {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); z-index: 200;
+    display: none; align-items: flex-start; justify-content: center;
+    overflow-y: auto; padding: 20px 10px; box-sizing: border-box;
+  }
+  #nameDialog .dialog-box {
+    background: #1a1a2a; border: 2px solid #444; border-radius: 12px;
+    padding: 24px; width: 300px; max-width: 85vw; text-align: center;
+    margin: auto; flex-shrink: 0;
+  }
+  #nameDialog h3 { color: #ff5555; font-size: 20px; margin-bottom: 16px; }
+  #nameInput {
+    width: 100%; padding: 10px 14px; font-size: 16px; border-radius: 8px;
+    border: 2px solid #555; background: #111; color: #fff; text-align: center;
+    box-sizing: border-box; margin-bottom: 16px;
+  }
+  #nameDialog .dialog-btns { display: flex; gap: 10px; justify-content: center; }
+  #nameDialog .dialog-btns button {
+    padding: 10px 24px; font-size: 15px; border-radius: 8px; border: none; cursor: pointer;
+  }
+  #nameConfirmBtn { background: #cc1111; color: #fff; font-weight: bold; }
+  #nameCancelBtn { background: #444; color: #ccc; }
+  /* IP输入弹窗 */
+  #ipDialog {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); z-index: 200;
+    display: none; align-items: flex-start; justify-content: center;
+    overflow-y: auto; padding: 20px 10px; box-sizing: border-box;
+  }
+  #ipDialog .dialog-box {
+    background: #1a1a2a; border: 2px solid #444; border-radius: 12px;
+    padding: 24px; width: 300px; max-width: 85vw; text-align: center;
+    margin: auto; flex-shrink: 0;
+  }
+  #ipDialog h3 { color: #4488ff; font-size: 20px; margin-bottom: 16px; }
+  #ipInput {
+    width: 100%; padding: 10px 14px; font-size: 16px; border-radius: 8px;
+    border: 2px solid #555; background: #111; color: #fff; text-align: center;
+    box-sizing: border-box; margin-bottom: 16px;
+  }
+  #ipDialog .dialog-btns { display: flex; gap: 10px; justify-content: center; }
+  #ipDialog .dialog-btns button {
+    padding: 10px 24px; font-size: 15px; border-radius: 8px; border: none; cursor: pointer;
+  }
+  #ipConfirmBtn { background: #2266cc; color: #fff; font-weight: bold; }
+  #ipCancelBtn { background: #444; color: #ccc; }
+  /* 设置里的联机区 */
+  .mp-server-info {
+    width: 300px; max-width: 90vw; padding: 10px 18px; margin-bottom: 8px;
+    background: rgba(60,160,60,0.15); border: 1px solid rgba(60,180,60,0.4);
+    border-radius: 8px; font-size: 13px; color: #66dd66; display: none;
+  }
+  .mp-connecting-info {
+    width: 300px; max-width: 90vw; padding: 10px 18px; margin-bottom: 8px;
+    background: rgba(60,120,255,0.15); border: 1px solid rgba(80,140,255,0.4);
+    border-radius: 8px; font-size: 13px; color: #88bbff; display: none;
+  }
+  #mpToggleRow { cursor: pointer; }
+  #mpToggleRow.disabled { opacity: 0.5; cursor: not-allowed; }
+  /* ===== 小屏幕适配 ===== */
+  @media (max-height: 640px) {
+    #joystickBase { width: 90px; height: 90px; bottom: 24px; left: 24px; }
+    #joystickKnob { width: 38px; height: 38px; }
+    #btnGroup { bottom: 24px; right: 20px; gap: 10px; }
+    #btnGroup button { width: 68px !important; height: 68px !important; font-size: 12px !important; }
+    #attackBtn, #jumpBtn, #sprintBtn { width: 68px !important; height: 68px !important; font-size: 12px !important; }
+    #hotbar { bottom: 108px; }
+    .hotbar-slot { width: 46px; height: 46px; }
+    #healthBarContainer { top: 50px; width: 160px; }
+    #pigHealthBarContainer { top: 72px; width: 130px; }
+    #srtHealthBar { top: 50px; width: 220px; }
+    #srtStatus { top: 60px; font-size: 14px; }
+    #distance { top: 32px; font-size: 12px; }
+    #hud { font-size: 18px; }
+  }
+  @media (max-width: 360px) {
+    #joystickBase { width: 86px; height: 86px; bottom: 20px; left: 20px; }
+    #btnGroup { bottom: 20px; right: 16px; gap: 8px; }
+    #btnGroup button, #attackBtn, #jumpBtn, #sprintBtn { width: 62px !important; height: 62px !important; font-size: 11px !important; }
+    .menu-btn { width: min(200px, 78vw); padding: 12px 0; font-size: 16px; }
+    .mode-cards { width: 260px; }
+  }
+
+/* ===== 生存模式样式 ===== */
+#survivalSubMenu {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.92); z-index: 101;
+  display: none; flex-direction: column; align-items: center; justify-content: flex-start; color: #fff;
+  overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+  padding: max(20px, env(safe-area-inset-top)) 10px max(20px, env(safe-area-inset-bottom));
+}
+#survivalSubMenu h2 { font-size: clamp(22px, 7vw, 32px); color: #ff6644; margin-bottom: 24px; letter-spacing: 3px; margin-top: auto; }
+#survivalSubMenu .srt-option:last-child { margin-bottom: auto; }
+#survivalPlayerCount { display: none; flex-direction: column; align-items: center; margin-top: 10px; }
+#survivalPlayerCount label { font-size: 16px; color: #aaa; margin-bottom: 10px; }
+#survivalShopItems .shop-item {
+  display: flex; align-items: center; padding: 12px 16px; border-radius: 10px;
+  background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.15);
+  cursor: pointer; transition: all 0.15s;
+}
+#survivalShopItems .shop-item:active { transform: scale(0.97); border-color: #ffaa00; }
+#survivalShopItems .shop-item.owned { border-color: #44ff44; opacity: 0.7; cursor: default; }
+#survivalShopItems .shop-item .item-icon { font-size: 28px; margin-right: 12px; }
+#survivalShopItems .shop-item .item-info { flex: 1; }
+#survivalShopItems .shop-item .item-name { font-size: 16px; font-weight: bold; color: #fff; }
+#survivalShopItems .shop-item .item-desc { font-size: 12px; color: #999; }
+#survivalShopItems .shop-item .item-price { font-size: 14px; font-weight: bold; color: #ffaa00; }
+
+/* ===== 小屏幕适配（生存模式+作弊面板）===== */
+@media (max-height: 640px) {
+  #survivalSubMenu h2 { font-size: 22px; margin-bottom: 16px; }
+  .srt-option { padding: 14px 0; font-size: 16px; }
+  #survivalShop { padding: 20px 10px; }
+  #survivalShopItems { width: 100%; max-width: 90vw; }
+  #devCheatPanel { width: 220px; font-size: 12px; padding: 8px; }
+}
+@media (max-width: 360px) {
+  #survivalSubMenu { padding: 10px 5px; }
+  #survivalShop { padding: 15px 5px; }
+  #devCheatPanel { width: 200px; font-size: 11px; }
+}
+
+/* ===== UI美化 - 全局增强 ===== */
+/* 所有按钮统一过渡效果 */
+.menu-btn, .srt-option, .mode-card, button, .shop-item {
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease !important;
+}
+.menu-btn:hover, .srt-option:hover, .mode-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.menu-btn:active, .srt-option:active, .mode-card:active {
+  transform: scale(0.96) !important;
+}
+
+/* 主菜单标题动画 */
+#startScreen h1 {
+  animation: titleGlow 2s ease-in-out infinite alternate;
+}
+@keyframes titleGlow {
+  from { text-shadow: 0 0 24px #ff0000, 0 0 48px rgba(255,0,0,0.3); }
+  to { text-shadow: 0 0 32px #ff3333, 0 0 64px rgba(255,50,50,0.5); }
+}
+
+/* 模式选择卡片悬停效果 */
+.mode-card {
+  backdrop-filter: blur(4px);
+}
+.mode-card:hover {
+  border-color: #ff6644 !important;
+  background: rgba(255,255,255,0.12);
+}
+
+/* 设置面板美化 */
+#settingsPanel {
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+.setting-row {
+  transition: background 0.2s ease;
+}
+.setting-row:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+/* 开关按钮美化 */
+.toggle {
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+}
+.toggle.on {
+  box-shadow: 0 0 8px rgba(204,34,34,0.5), inset 0 1px 3px rgba(0,0,0,0.3);
+}
+
+/* 游戏结束画面增强 */
+#gameOverScreen {
+  backdrop-filter: blur(6px);
+}
+#gameOverScreen h1 {
+  animation: gameOverPulse 1.5s ease-in-out infinite;
+}
+@keyframes gameOverPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* 危险叠加层平滑过渡 */
+#dangerOverlay {
+  transition: opacity 0.3s ease;
+}
+
+/* 联机房间列表美化 */
+.mp-room-item {
+  backdrop-filter: blur(4px);
+  transition: transform 0.15s ease, border-color 0.2s ease;
+}
+.mp-room-item:hover {
+  border-color: #ff6644 !important;
+  background: rgba(255,255,255,0.1);
+}
+
+/* 弹窗美化 */
+#nameDialog .dialog-box, #ipDialog .dialog-box, #devPasswordDialog > div {
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* 输入框聚焦效果 */
+#nameInput:focus, #ipInput:focus, #devPasswordInput:focus {
+  border-color: #ff4444 !important;
+  box-shadow: 0 0 8px rgba(255,68,68,0.3);
+  outline: none;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+/* 生存模式商店动画 */
+#survivalShop .shop-item {
+  animation: shopItemIn 0.3s ease-out;
+}
+@keyframes shopItemIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 开发者作弊面板 */
+#devCheatPanel {
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(255,68,68,0.3);
+}
+#devCheatPanel label {
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+#devCheatPanel label:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* 准星美化 */
+#crosshair {
+  mix-blend-mode: difference;
+}
+
+/* ===== 连接质量HUD ===== */
+#connHUD {
+  position: fixed; top: 10px; left: 10px;
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.65); border-radius: 8px; padding: 5px 10px;
+  color: #ccc; font-size: 12px; z-index: 25; pointer-events: none;
+  backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.12);
+}
+#connDot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #44ff44; flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+#connDot.poor { background: #ffaa00; }
+#connDot.bad { background: #ff4444; }
+#connDot.offline { background: #666; }
+#connPing { font-weight: bold; min-width: 44px; }
+#connPlayers { color: #88bbff; }
+#connBw { color: #666; font-size: 11px; }
+
+/* ===== 断线重连遮罩 ===== */
+#reconnectOverlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85); z-index: 150;
+  display: flex; align-items: center; justify-content: center;
+}
+.reconnect-box {
+  text-align: center; padding: 30px 40px;
+  background: rgba(20,20,40,0.95); border: 2px solid #ff6644;
+  border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.reconnect-spinner {
+  width: 40px; height: 40px; margin: 0 auto 16px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #ff6644; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== 鼠标锁定提示 ===== */
+#pointerLockHint {
+  position: fixed;
+  bottom: 50%;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
+  z-index: 15;
+  pointer-events: none;
+  text-shadow: 0 0 6px #000;
+  animation: hintPulse 2s ease-in-out infinite;
+  display: none;
+}
+@keyframes hintPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ===== 设置面板点击修复 ===== */
+#settingsPanel {
+  touch-action: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+#settingsPanel .setting-row {
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+#settingsPanel .setting-row:active {
+  background: rgba(255,255,255,0.15);
+}
+/* 确保toggle可点击 */
+.toggle {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 2;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  min-width: 48px;
+  min-height: 28px;
+}
+/* 速度滑块也确保可交互 */
+#settingsPanel input[type=range] {
+  touch-action: manipulation;
+  pointer-events: auto;
+}
+
+/* ===== 设置面板点击修复 v2 ===== */
+#settingsPanel {
+  pointer-events: all !important;
+}
+#settingsPanel .setting-row {
+  pointer-events: all !important;
+  cursor: pointer !important;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  z-index: 1;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#settingsPanel .setting-row:active {
+  background: rgba(255,255,255,0.15) !important;
+}
+#settingsPanel .toggle {
+  pointer-events: all !important;
+  position: relative;
+  z-index: 2;
+  touch-action: manipulation;
+}
+/* 移除::after伪元素的pointer-events干扰 */
+#settingsPanel .toggle::after {
+  pointer-events: none;
+}
+/* 确保label也不阻挡点击 */
+#settingsPanel .setting-row label {
+  pointer-events: none;
+}
+
+/* ===== 捉迷藏模式 + 我的信息 ===== */
+#hideSubMenu, #myInfoScreen {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.92); z-index: 101;
+  display: none; flex-direction: column; align-items: center; justify-content: flex-start; color: #fff;
+  overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+  padding: max(20px, env(safe-area-inset-top)) 10px max(20px, env(safe-area-inset-bottom));
+}
+#hideSubMenu h2 { font-size: clamp(22px, 7vw, 32px); color: #44ff88; margin-bottom: 8px; letter-spacing: 3px; margin-top: auto; }
+#hideSubMenu #hideBackBtn { margin-bottom: auto; }
+#hidePlayerCount { display: none; flex-direction: column; align-items: center; margin-top: 10px; }
+#hidePlayerCount label { font-size: 16px; color: #aaa; margin-bottom: 10px; }
+#myInfoScreen h2 { font-size: clamp(22px, 7vw, 32px); color: #9a6aff; margin-bottom: 24px; letter-spacing: 3px; margin-top: auto; }
+#myInfoScreen #myInfoBackBtn { margin-bottom: auto; }
+#myInfoScreen .about-row { width: 340px; max-width: 92vw; }
+#myInfoList { display: flex; flex-direction: column; width: 340px; max-width: 92vw; }
+#myInfoList .info-row {
+  display: flex; align-items: center; padding: 12px 16px; margin-bottom: 8px;
+  background: rgba(255,255,255,0.06); border-radius: 8px; font-size: 14px;
+}
+#myInfoList .info-mode { font-weight: bold; color: #fff; width: 96px; flex-shrink: 0; }
+#myInfoList .info-detail { color: #aaa; flex: 1; text-align: right; font-size: 13px; }
+
+/* ===== 我的信息返回按钮（固定左上角，同关于页） ===== */
+#myInfoScreen #myInfoBackBtn {
+  position: fixed; top: 16px; left: 16px; margin-bottom: 0;
+  padding: 10px 18px; font-size: 15px;
+  background: rgba(255,255,255,0.1); color: #ccc; border: 1px solid #555;
+  border-radius: 8px; cursor: pointer; z-index: 102;
+}
+#myInfoScreen #myInfoBackBtn:active { background: rgba(255,255,255,0.2); }
+#myInfoScreen h2 { margin-top: 40px; }
+
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="dangerOverlay"></div>
+<div id="gasOverlay"></div>
+<div id="hitFlash"></div>
+<div id="crosshair"></div>
+<div id="pointerLockHint">点击画面锁定鼠标</div>
+<div id="hud">00:00</div>
+<div id="distance">距离: --</div>
+<div id="connHUD" style="display:none;">
+  <span id="connDot"></span>
+  <span id="connPing">--ms</span>
+  <span id="connPlayers">1/6</span>
+  <span id="connBw"></span>
+</div>
+<div id="reconnectOverlay" style="display:none;">
+  <div class="reconnect-box">
+    <div class="reconnect-spinner"></div>
+    <div id="reconnectTitle" style="font-size:22px;font-weight:bold;color:#fff;margin-bottom:8px;">连接断开</div>
+    <div id="reconnectStatus" style="font-size:14px;color:#aaa;margin-bottom:6px;">正在重连... (1/5)</div>
+    <div id="reconnectCountdown" style="font-size:13px;color:#888;margin-bottom:16px;"></div>
+    <button id="reconnectCancelBtn" style="padding:10px 30px;font-size:14px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;margin-right:10px;">取消</button>
+    <button id="reconnectManualBtn" style="display:none;padding:10px 30px;font-size:14px;background:linear-gradient(135deg,#2266cc,#3388ff);color:#fff;border:none;border-radius:8px;cursor:pointer;">手动重连</button>
+  </div>
+</div>
+<div id="healthBarContainer"><div id="healthBar"></div><div id="healthText">100/100</div></div>
+<div id="pigHealthBarContainer"><div id="pigHealthBar"></div><div id="pigHealthText">猪: 100/100</div></div>
+<div id="blackpigStatus"></div>
+<div id="punishOverlay"></div>
+<div id="pauseLabel">已暂停</div>
+<button id="settingsBtn">⚙</button>
+<div id="joystickBase"><div id="joystickKnob"></div></div>
+<div id="btnGroup">
+  <button id="jumpBtn">跳跃</button>
+  <button id="sprintBtn">冲刺</button>
+  <button id="attackBtn">挥刀</button>
+</div>
+<div id="hotbar">
+  <div class="hotbar-slot" id="slotSword" style="background-image:url('./malay_sword.png')"></div>
+</div>
+<!-- 设置面板 -->
+<div id="settingsPanel">
+  <h2>设置</h2>
+  <div class="mp-server-info" id="mpServerInfo" style="display:none;">局域网联机已开启 IP: -- 端口: 8765</div>
+  <div class="mp-connecting-info" id="mpConnectInfo">已连接到房间</div>
+  <div class="setting-row" id="mpToggleRow"><label>局域网联机</label><div class="toggle" id="toggleMultiplayer"></div></div>
+  <div class="setting-row"><label id="speedLabel">猪移动速度</label><input type="range" id="pigSpeedSlider" min="1" max="10" value="1"><span class="slider-val" id="pigSpeedVal">1</span></div>
+  <div class="setting-row"><label>穿墙模式</label><div class="toggle" id="toggleNoclip"></div></div>
+  <div class="setting-row"><label>无AI（Bot不动）</label><div class="toggle" id="toggleNoAI"></div></div>
+  <div class="setting-row"><label>白天模式</label><div class="toggle" id="toggleDayMode"></div></div>
+  <div class="setting-row"><label>毒气模式</label><div class="toggle" id="toggleGasMode"></div></div>
+  <div class="setting-row"><label>错误显示</label><div class="toggle" id="toggleErrorDisplay"></div></div>
+  <div class="setting-row" id="devCheatRow" style="display:none"><label>🎮 开发者模式</label><div class="toggle" id="devCheatToggle"></div></div>
+  <button id="closeSettingsBtn">继续游戏</button>
+  <button id="returnMenuBtn">返回主菜单</button>
+</div>
+<!-- 主菜单 -->
+<div id="startScreen">
+  <h1>猪来了</h1>
+  <div class="subtitle">NEXTBOT CHASE</div>
+  <div class="version-tag">VERSION V11 · 联机版</div>
+  <button id="startBtn" class="menu-btn">开始游戏</button>
+  <button id="multiplayerBtn" class="menu-btn" style="background:linear-gradient(135deg,#1155cc,#3377ff);box-shadow:0 0 16px rgba(0,80,255,0.3);">联机模式</button>
+  <button id="myInfoBtn" class="menu-btn" style="background:linear-gradient(135deg,#7a4acc,#9a6aff);box-shadow:0 0 16px rgba(150,80,255,0.3);">我的信息</button>
+  <button id="changeNameBtn" class="menu-btn" style="background:linear-gradient(135deg,#444,#666);font-size:16px;padding:12px 0;">改名称</button>
+  <button id="aboutBtn" class="menu-btn">关于</button>
+</div>
+<!-- 模式选择 -->
+<!-- 单人/多人选择 -->
+<div id="playerSelectScreen">
+  <h2>选择模式</h2>
+  <div class="player-select-container">
+    <div class="player-select-card" id="singlePlayerBtn" style="background-image:url('single_bg.jpg');">
+      <div class="player-select-overlay"></div>
+      <div class="player-select-text">单人模式</div>
+    </div>
+    <div class="player-select-card" id="multiPlayerBtn" style="background-image:url('multi_bg.jpg');">
+      <div class="player-select-overlay"></div>
+      <div class="player-select-text">多人模式</div>
+    </div>
+  </div>
+  <button id="playerSelectBackBtn" class="menu-btn secondary">← 返回</button>
+</div>
+
+<div id="modeSelectScreen">
+  <h2>选择游戏模式</h2>
+  <div class="mode-cards">
+    <div class="mode-card" data-mode="normal">
+      <div class="mode-cover" style="background-image:url('./cover_normal.jpg')"></div>
+      <div class="mode-info"><div class="mode-name">普通模式</div><div class="mode-desc">经典追逐逃生，被猪抓到即死</div></div>
+    </div>
+    <div class="mode-card" data-mode="hunt">
+      <div class="mode-cover" style="background-image:url('./cover_hunt.jpg')"></div>
+      <div class="mode-info"><div class="mode-name">打猪模式</div><div class="mode-desc">手持马来剑，与猪战斗到底</div></div>
+    </div>
+    <div class="mode-card" data-mode="blackpig">
+      <div class="mode-cover" style="background-image:url('./cover_blackpig.jpg')"></div>
+      <div class="mode-info"><div class="mode-name">黑猪模式</div><div class="mode-desc">123木头人，被看到动就罚站</div></div>
+    </div>
+    <div class="mode-card" data-mode="srt">
+      <div class="mode-cover" style="background-image:url('./cover_srt.jpg');background-size:cover;background-position:center;"></div>
+      <div class="mode-info"><div class="mode-name">SRT模式</div><div class="mode-desc">追杀SRT，拿到青蛙后展开追逐</div></div>
+    </div>
+    <div class="mode-card" data-mode="pvp">
+      <div class="mode-cover" style="background-image:url('./cover_pvp.jpg')"></div>
+      <div class="mode-info"><div class="mode-name">PVP对战</div><div class="mode-desc">玩家互砍，刀剑相向，胜者为王</div></div>
+    </div>
+    <div class="mode-card" data-mode="survival">
+      <div class="mode-cover" style="background-image:url('./cover_survival.jpg');background-size:cover;"></div>
+      <div class="mode-info"><div class="mode-name">打福瑞模式</div><div class="mode-desc">波次挑战，福瑞越来越快，撑到最后</div></div>
+    </div>
+    <div class="mode-card" data-mode="hide">
+      <div class="mode-cover" style="background-image:url('./cover_hide.jpg');background-size:cover;background-position:center;"></div>
+      <div class="mode-info"><div class="mode-name">捉迷藏模式</div><div class="mode-desc">多人专属：10秒躲藏，60秒搜捕，一刀致命</div></div>
+    </div>
+  </div>
+  <button id="modeBackBtn">← 返回</button>
+</div>
+
+<!-- 生存模式子菜单 -->
+<div id="survivalSubMenu">
+  <h2>打福瑞模式</h2>
+  <button class="srt-option" id="survivalSingleBtn">单人模式</button>
+  <button class="srt-option secondary" id="survivalMultiBtn">多人模式</button>
+  <div id="survivalPlayerCount">
+    <label>选择人数（包含你）</label>
+    <div class="count-selector">
+      <button class="count-btn survival-count" data-count="2">2</button>
+      <button class="count-btn survival-count" data-count="3">3</button>
+      <button class="count-btn survival-count" data-count="4">4</button>
+      <button class="count-btn survival-count" data-count="5">5</button>
+      <button class="count-btn survival-count" data-count="6">6</button>
+    </div>
+    <button class="srt-option" id="survivalStartMultiBtn" style="width:200px;padding:12px 0;font-size:16px;">创建房间</button>
+  </div>
+  <button id="survivalBackBtn" style="margin-top:20px;padding:10px 24px;font-size:15px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">← 返回</button>
+</div>
+<!-- 生存模式多人等待界面 -->
+<div id="survivalMultiLobby" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:100;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(20px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom));box-sizing:border-box;overflow-y:auto;overflow-x:hidden;">
+  <h2 style="color:#fff;margin-bottom:20px;">打福瑞模式 - 等待玩家</h2>
+  <div id="survivalLobbyInfo" style="color:#aaa;margin-bottom:10px;font-size:16px;">等待玩家加入... (0/2)</div>
+  <div id="survivalLobbyIP" style="color:#44aaff;margin-bottom:20px;font-size:14px;">IP: 正在获取...</div>
+  <div id="survivalPlayerList"></div>
+  <button id="survivalStartGameBtn" style="display:none;padding:12px 40px;font-size:18px;background:linear-gradient(135deg,#ff4444,#ff6644);color:#fff;border:none;border-radius:10px;cursor:pointer;margin-bottom:10px;">开始游戏</button>
+  <button id="survivalCancelLobbyBtn" style="padding:10px 30px;font-size:14px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">取消房间</button>
+</div>
+<!-- 生存模式HUD -->
+<div id="survivalWaveInfo" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);color:#ffaa00;font-size:18px;font-weight:bold;z-index:10;text-shadow:0 0 8px #000;display:none;pointer-events:none;letter-spacing:2px;"></div>
+<div id="survivalPoints" style="position:fixed;top:35px;left:50%;transform:translateX(-50%);color:#44ff44;font-size:14px;font-weight:bold;z-index:10;text-shadow:0 0 6px #000;display:none;pointer-events:none;"></div>
+<div id="survivalShopBtn" style="position:fixed;top:60px;right:12px;padding:8px 16px;font-size:14px;font-weight:bold;background:linear-gradient(135deg,#aa6600,#ffaa00);color:#fff;border:none;border-radius:8px;z-index:20;display:none;cursor:pointer;box-shadow:0 0 12px rgba(255,170,0,0.4);">商店 (0积分)</div>
+<!-- 开发者作弊窗口 -->
+<div id="devCheatPanel" style="position:fixed;top:10px;right:10px;width:260px;max-height:80vh;background:rgba(0,0,0,0.92);border:2px solid #ff4444;border-radius:12px;padding:12px;z-index:200;display:none;overflow-y:auto;color:#fff;font-size:13px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <span style="color:#ff4444;font-weight:bold;font-size:15px;">🎮 开发者模式</span>
+    <button id="devCheatClose" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;">×</button>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <input type="checkbox" id="devSpeed"> <span>⚡ 加速模式</span>
+      <input type="number" id="devSpeedMult" value="2" min="1" max="20" step="0.5" style="width:56px;background:#222;border:1px solid #555;color:#fff;padding:4px;border-radius:4px;margin-left:auto;">
+      <span>倍速</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <input type="checkbox" id="devNoCooldown"> <span>🔄 冲刺无冷却</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <input type="checkbox" id="devWallhack"> <span>👻 穿墙模式</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+      <input type="checkbox" id="devAutoAim"> <span>🎯 自动锁敌</span>
+    </label>      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="devInvincible"> <span>🛡️ 无敌模式</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="devESP"> <span>👁️ 透视（ESP）</span>
+      </label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span>⚔️ 攻击伤害:</span>
+        <input type="number" id="devDamage" value="50" min="1" max="999" style="width:60px;background:#222;border:1px solid #555;color:#fff;padding:4px;border-radius:4px;">
+      </div>
+  </div>
+</div>
+<!-- 密码输入弹窗 -->
+<div id="devPasswordDialog" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:300;display:none;align-items:center;justify-content:center;">
+  <div style="background:#1a1a2a;border:2px solid #ff4444;border-radius:12px;padding:24px;width:280px;text-align:center;">
+    <h3 style="color:#ff4444;font-size:18px;margin-bottom:8px;">开发者验证</h3>
+    <div style="color:#888;font-size:12px;margin-bottom:12px;">输入密码开启/关闭开发者模式</div>
+    <input type="password" id="devPasswordInput" placeholder="输入密码" style="width:100%;padding:10px 14px;font-size:16px;border-radius:8px;border:2px solid #555;background:#111;color:#fff;text-align:center;box-sizing:border-box;margin-bottom:12px;">
+    <div id="devPasswordError" style="color:#ff4444;font-size:13px;margin-bottom:12px;display:none;">密码错误！</div>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button id="devPasswordCancel" style="padding:8px 20px;font-size:14px;background:#444;color:#ccc;border:none;border-radius:8px;cursor:pointer;">取消</button>
+      <button id="devPasswordConfirm" style="padding:8px 20px;font-size:14px;background:#cc1111;color:#fff;font-weight:bold;border:none;border-radius:8px;cursor:pointer;">确认</button>
+    </div>
+  </div>
+</div>
+<!-- 生存模式商店 -->
+<div id="survivalShop" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:100;display:none;flex-direction:column;align-items:center;justify-content:flex-start;padding:40px 20px;overflow-y:auto;">
+  <h2 style="color:#ffaa00;font-size:28px;margin-bottom:10px;">商店</h2>
+  <div id="survivalShopPoints" style="color:#44ff44;font-size:16px;margin-bottom:20px;">积分: 0</div>
+  <div id="survivalShopItems" style="display:flex;flex-direction:column;gap:12px;width:300px;max-width:90vw;"></div>
+  <button id="survivalShopClose" style="margin-top:24px;padding:12px 40px;font-size:18px;font-weight:bold;background:#cc1111;color:#fff;border:none;border-radius:8px;cursor:pointer;">关闭商店</button>
+</div>
+
+<!-- SRT子菜单 -->
+<div id="srtSubMenu">
+  <h2>SRT 模式</h2>
+  <button class="srt-option" id="srtSingleBtn">单人模式</button>
+  <button class="srt-option secondary" id="srtMultiBtn">多人模式</button>
+  <div id="srtPlayerCount">
+    <label>选择人数（包含你）</label>
+    <div class="count-selector">
+      <button class="count-btn" data-count="2">2</button>
+      <button class="count-btn" data-count="3">3</button>
+      <button class="count-btn" data-count="4">4</button>
+      <button class="count-btn" data-count="5">5</button>
+      <button class="count-btn" data-count="6">6</button>
+    </div>
+    <button class="srt-option" id="srtStartMultiBtn" style="width:200px;padding:12px 0;font-size:16px;">创建房间</button>
+  </div>
+  <button id="srtBackBtn" style="margin-top:20px;padding:10px 24px;font-size:15px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">← 返回</button>
+</div>
+<!-- SRT多人等待界面 -->
+<div id="srtMultiLobby" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:100;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(20px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom));box-sizing:border-box;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;">
+  <h2 style="color:#fff;margin-bottom:20px;">SRT 多人模式 - 等待玩家</h2>
+  <div id="srtLobbyInfo" style="color:#aaa;margin-bottom:10px;font-size:16px;">等待玩家加入... (0/2)</div>
+  <div id="srtLobbyIP" style="color:#44aaff;margin-bottom:20px;font-size:14px;">IP: 正在获取...</div>
+  <div id="srtPlayerList" style="width:100%;max-width:400px;margin-bottom:20px;"></div>
+  <div id="srtSrtSelect" style="display:none;width:100%;max-width:400px;margin-bottom:20px;">
+    <div style="color:#ffaa00;margin-bottom:10px;">选择谁当 SRT：</div>
+    <div id="srtSrtSelectList"></div>
+  </div>
+  <button id="srtStartGameBtn" style="display:none;padding:12px 40px;font-size:18px;background:linear-gradient(135deg,#ff4444,#ff6644);color:#fff;border:none;border-radius:10px;cursor:pointer;margin-bottom:10px;">开始游戏</button>
+  <button id="srtCancelLobbyBtn" style="padding:10px 30px;font-size:14px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">取消房间</button>
+</div>
+<!-- SRT OK按钮和状态 -->
+<button id="srtOKBtn">拿到青蛙了！OK</button>
+<div id="srtStatus"></div>
+<div id="srtHealthBar">
+  <div class="srt-name">SRT</div>
+  <div class="srt-hp-bg"><div class="srt-hp-fill" id="srtHpFill"></div></div>
+  <div class="srt-hp-text" id="srtHpText">100/100</div>
+</div>
+
+<!-- 捉迷藏子菜单 -->
+<div id="hideSubMenu">
+  <h2>捉迷藏模式</h2>
+  <div style="color:#888;font-size:13px;margin-bottom:18px;">多人专属 · 10秒躲藏 · 60秒搜捕 · 一刀致命</div>
+  <div id="hidePlayerCount">
+    <label>选择人数（包含你）</label>
+    <div class="count-selector">
+      <button class="count-btn hide-count" data-count="2">2</button>
+      <button class="count-btn hide-count" data-count="3">3</button>
+      <button class="count-btn hide-count" data-count="4">4</button>
+      <button class="count-btn hide-count" data-count="5">5</button>
+      <button class="count-btn hide-count" data-count="6">6</button>
+    </div>
+    <button class="srt-option" id="hideStartMultiBtn" style="width:200px;padding:12px 0;font-size:16px;">创建房间</button>
+  </div>
+  <button id="hideBackBtn" style="margin-top:20px;padding:10px 24px;font-size:15px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">← 返回</button>
+</div>
+<!-- 捉迷藏等待大厅 -->
+<div id="hideMultiLobby" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:100;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(20px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom));box-sizing:border-box;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;">
+  <h2 style="color:#fff;margin-bottom:20px;">捉迷藏模式 - 等待玩家</h2>
+  <div id="hideLobbyInfo" style="color:#aaa;margin-bottom:10px;font-size:16px;">等待玩家加入... (0/2)</div>
+  <div id="hideLobbyIP" style="color:#44aaff;margin-bottom:20px;font-size:14px;">IP: 正在获取...</div>
+  <div id="hidePlayerList" style="width:100%;max-width:400px;margin-bottom:20px;"></div>
+  <div id="hideSeekerSelect" style="display:none;width:100%;max-width:400px;margin-bottom:20px;">
+    <div style="color:#ffaa00;margin-bottom:10px;">选择谁当抓捕者：</div>
+    <div id="hideSeekerSelectList"></div>
+  </div>
+  <button id="hideStartGameBtn" style="display:none;padding:12px 40px;font-size:18px;background:linear-gradient(135deg,#ff4444,#ff6644);color:#fff;border:none;border-radius:10px;cursor:pointer;margin-bottom:10px;">开始游戏</button>
+  <button id="hideCancelLobbyBtn" style="padding:10px 30px;font-size:14px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">取消房间</button>
+</div>
+<!-- 捉迷藏HUD -->
+<div id="hideInfo" style="position:fixed;top:60px;left:50%;transform:translateX(-50%);color:#ffdd66;font-size:16px;font-weight:bold;z-index:10;text-shadow:0 0 8px #000;display:none;pointer-events:none;letter-spacing:1px;"></div>
+<div id="hideBlackout" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#000;z-index:90;display:none;align-items:center;justify-content:center;pointer-events:none;"></div>
+
+<!-- 我的信息页面 -->
+<div id="myInfoScreen">
+  <button id="myInfoBackBtn">← 返回</button>
+  <h2>我的信息</h2>
+  <div class="about-row" id="myInfoSummary" style="border:1px solid #ff6644;"><span class="label">总计</span><span class="value" id="myInfoSummaryText">-</span></div>
+  <div id="myInfoList" style="width:340px;max-width:92vw;"></div>
+  <div style="color:#555;font-size:12px;margin-top:14px;margin-bottom:20px;">数据保存在本机浏览器中</div>
+</div>
+<!-- 关于页面 -->
+<div id="aboutScreen">
+  <button id="aboutBackBtn">← 返回</button>
+  <h2>关于游戏</h2>
+  <div class="about-row"><span class="label">作者</span><span class="value">xzd1314</span></div>
+  <div class="about-row"><span class="label">版本</span><span class="value">V11</span></div>
+  <div class="about-row"><span class="label">网站</span><span class="value"><a id="websiteLink">https://xzd1314.github.io/</a></span></div>
+</div>
+<!-- 联机菜单 -->
+<div id="multiplayerScreen">
+  <div id="mpTopBar">
+    <button id="mpBackBtn">← 退出</button>
+    <div id="mpTitle">局域网联机</div>
+    <button id="mpInputIPBtn">输入IP</button>
+  </div>
+  <div id="mpScanIndicator">正在扫描局域网房间...</div>
+  <div id="mpRoomList">
+    <div id="mpEmptyHint">未找到房间，确保两台设备在同一局域网\n或点击右上角手动输入IP</div>
+  </div>
+</div>
+<!-- 改名弹窗 -->
+<div id="nameDialog">
+  <div class="dialog-box">
+    <h3>修改玩家名称</h3>
+    <input type="text" id="nameInput" maxlength="8" placeholder="输入玩家名">
+    <div id="nameError" style="color:#ff4444;font-size:13px;margin-bottom:12px;display:none;">请输入玩家名称！</div>
+    <div class="dialog-btns">
+      <button id="nameCancelBtn">取消</button>
+      <button id="nameConfirmBtn">确定</button>
+    </div>
+  </div>
+</div>
+<!-- IP输入弹窗 -->
+<div id="ipDialog">
+  <div class="dialog-box">
+    <h3>手动连接</h3>
+    <input type="text" id="ipInput" placeholder="例如 192.168.1.100:8765">
+    <div class="dialog-btns">
+      <button id="ipCancelBtn">取消</button>
+      <button id="ipConfirmBtn">连接</button>
+    </div>
+  </div>
+</div>
+<!-- 游戏结束 -->
+<div id="gameOverScreen">
+  <h1 id="gameOverTitle">你被抓到了</h1>
+  <div class="time-text">存活时间: <span id="finalTime">00:00</span></div>
+  <div class="best-text">最佳记录: <span id="bestTime">00:00</span></div>
+  <button id="restartBtn">再来一次</button>
+  <button id="backToMenuBtn" style="margin-top:12px;padding:10px 30px;font-size:15px;background:transparent;color:#aaa;border:1px solid #666;border-radius:8px;cursor:pointer;">返回主菜单</button>
+</div>
+<!-- ===== PC版桥接注入（必须在游戏脚本之前）===== -->
+<!-- Tauri桥接注入（替代Electron preload，修改器CDP兼容）-->
+<script src="js/tauri-bridge.js"></script>
+<!-- 旧Electron桥接（保留兼容，Tauri模式下会覆盖）-->
+<!-- PC版桥接注入（必须在游戏脚本之前）-->
+<script>
+(function(){
+  // 仅在Electron（有__pcBridge）环境生效；Tauri/移动端跳过，保留tauri-bridge.js的桥接
+  if (!window.__pcBridge) return;
+  window.AndroidBridge = {
+    call: function(payload) {
+      try {
+        var p = JSON.parse(payload);
+        return window.__pcBridge.call(p.method, p.args || {});
+      } catch(e) { console.error('[PCBridge] parse error:', e); return null; }
+    }
+  };
+  window.__pcBridge.onCallback(function(name, args) {
+    if (window.NativeCallback && typeof window.NativeCallback[name] === 'function') {
+      window.NativeCallback[name].apply(window.NativeCallback, args);
+    }
+  });
+  var style = document.createElement('style');
+  style.textContent =
+    '#joystickBase, #joystickKnob, #jumpBtn, #sprintBtn, #attackBtn { display: none !important; }' +
+    'body { cursor: default; }';
+  document.head.appendChild(style);
+  console.log('[PC版] 桥接已注入，手机UI已隐藏');
+})();
+</script>
+<script src="three.min.js"></script>
+<script src="bot_texture.js"></script>
+<script src="embedded_images.js"></script>
+<script src="srt_textures.js"></script>
+<script src="multiplayer.js"></script>
+<script src="js/config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/pathfinding.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/survival.js"></script>
+<script src="js/hide.js"></script>
+<script src="js/game.js"></script>
+<script src="js/update.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/input.js"></script>
+<script src="js/pc-input.js"></script>
+<script src="js/bootstrap.js"></script>
+</body>
+</html>
+
+
