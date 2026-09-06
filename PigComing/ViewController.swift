@@ -10,7 +10,6 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
 
     deinit {
         wsServer.stop()
-        udpManager.stop()
     }
 
     override func viewDidLoad() {
