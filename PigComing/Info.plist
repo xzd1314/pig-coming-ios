@@ -80,11 +80,6 @@
 	<string>15.0</string>
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_pigcoming._tcp</string>
