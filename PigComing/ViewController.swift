@@ -21,8 +21,14 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // WebView 撑满整个屏幕（忽略安全区域，修复黑边）
-        webView.frame = UIScreen.main.bounds
+        // 修复 iPhone 横屏两侧黑边：
+        // UIScreen.main.bounds 在横屏下仍返回竖屏尺寸（宽高未互换），
+        // 会导致 WebView 宽度只有屏幕竖屏宽（如 iPhone 15 的 393pt），
+        // 而实际屏幕宽 852pt，于是左右各露出大片黑边。
+        // view.bounds 始终等于当前真实显示尺寸，旋转时自动重算。
+        if webView.frame != view.bounds {
+            webView.frame = view.bounds
+        }
     }
 
     private func setupWebView() {
@@ -35,16 +41,17 @@ class ViewController: UIViewController, WKScriptMessageHandler, WKNavigationDele
         config.mediaTypesRequiringUserActionForPlayback = []
         config.suppressesIncrementalRendering = false
 
-        // 用屏幕尺寸创建 WebView，忽略安全区域（修复黑边）
-        webView = WKWebView(frame: UIScreen.main.bounds, configuration: config)
+        // 修复黑边：初始 frame 用 view.bounds（不是 UIScreen.main.bounds）
+        webView = WKWebView(frame: view.bounds, configuration: config)
         webView.navigationDelegate = self
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.translatesAutoresizingMaskIntoConstraints = true
         webView.isOpaque = true
         webView.backgroundColor = .black
         webView.isUserInteractionEnabled = true
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        // 忽略安全区域
+        // 忽略安全区域，让画面铺满刘海/圆角区域
         if #available(iOS 11.0, *) {
             webView.scrollView.contentInsetAdjustmentBehavior = .never
         }
