@@ -5,7 +5,7 @@ function resetAllUI() {
     'srtSubMenu','srtMultiLobby','aboutScreen','settingsPanel','multiplayerScreen',
     'nameDialog','ipDialog','survivalSubMenu','survivalMultiLobby','survivalShop',
     'devCheatPanel','devPasswordDialog','mpWaitScreen','hideSubMenu','hideMultiLobby','myInfoScreen',
-    'pigshootSubMenu','pvpgunSubMenu'];
+    'pigshootSubMenu','pigshootModeSubMenu','pvpgunSubMenu'];
   for (const id of allScreens) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -961,18 +961,37 @@ function setupMenu() {
       Bridge.send(JSON.stringify({type:'srtReady', token:MP._handshakeToken}));
     }
   });
-  // ===== 打猪枪战 子菜单 =====
+  // ===== 打猪枪战 子菜单（波次/无尽 → 单人/多人）=====
   document.getElementById('pigshootBackBtn').addEventListener('click', () => {
     document.getElementById('pigshootSubMenu').style.display = 'none';
     document.getElementById('modeSelectScreen').style.display = 'flex';
   });
-  document.getElementById('pigshootSingleBtn').addEventListener('click', () => {
+  // 波次 / 无尽 → 进入第二级（选单人/多人）
+  document.getElementById('pigshootWaveBtn').addEventListener('click', () => {
+    window._pigshootRule = 'wave';
+    document.getElementById('pigshootModeTitle').textContent = '打猪枪战 · 波次模式';
     document.getElementById('pigshootSubMenu').style.display = 'none';
+    document.getElementById('pigshootModeSubMenu').style.display = 'flex';
+  });
+  document.getElementById('pigshootEndlessBtn').addEventListener('click', () => {
+    window._pigshootRule = 'endless';
+    document.getElementById('pigshootModeTitle').textContent = '打猪枪战 · 无尽模式';
+    document.getElementById('pigshootSubMenu').style.display = 'none';
+    document.getElementById('pigshootModeSubMenu').style.display = 'flex';
+  });
+  // 第二级：返回
+  document.getElementById('pigshootModeBackBtn').addEventListener('click', () => {
+    document.getElementById('pigshootModeSubMenu').style.display = 'none';
+    document.getElementById('pigshootSubMenu').style.display = 'flex';
+  });
+  // 第二级：单人/多人
+  document.getElementById('pigshootSingleBtn').addEventListener('click', () => {
+    document.getElementById('pigshootModeSubMenu').style.display = 'none';
     window._isMultiplayer = false;
     startGame('pigshoot');
   });
   document.getElementById('pigshootMultiBtn').addEventListener('click', () => {
-    document.getElementById('pigshootSubMenu').style.display = 'none';
+    document.getElementById('pigshootModeSubMenu').style.display = 'none';
     window._isMultiplayer = true;
     startGame('pigshoot');
   });

@@ -155,7 +155,8 @@ function gunInit(mode) {
   gun.recoil = 0; gun.bloom = 1.0; gun.kills = 0;
   gun.wave = 0; gun.waveActive = false; gun.waveDelay = 2.5;
   gun.pigs = [];
-  gun.endless = (mode === 'pigshoot' && window._isMultiplayer === false);
+  // 无尽模式由子菜单选择（_pigshootRule），单人/多人均可玩
+  gun.endless = (mode === 'pigshoot' && window._pigshootRule === 'endless');
   gun.endlessLevel = 1; gun.endlessSpawnDelay = 0;
   gun.hurtCd = 0;
   gun.retargetTimer = 8;
