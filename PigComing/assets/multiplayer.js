@@ -347,6 +347,24 @@ function handleHostMessage(clientId, msg) {
       }
       break;
     }
+    case 'gunHit': {
+      // PVP枪战：客户端报告命中某玩家，主机权威扣血
+      if (MP.gameStarted && gameMode === 'pvpgun') {
+        const victim = MP.players[msg.victim];
+        const dmg = Math.min(Math.max(1, msg.damage || 15), 100);
+        if (victim && !victim.dead && typeof gunDamagePlayerHost === 'function') {
+          gunDamagePlayerHost(victim, dmg, clientId);
+        }
+      }
+      break;
+    }
+    case 'gunHitPig': {
+      // 打猪枪战：客户端报告命中附近的猪，主机按最近猪应用伤害
+      if (MP.gameStarted && gameMode === 'pigshoot' && typeof gunApplyClientPigHit === 'function') {
+        gunApplyClientPigHit(msg.px, msg.pz, Math.min(Math.max(1, msg.damage||15), 100));
+      }
+      break;
+    }
     case 'srtReady': {
       if (MP.gameStarted && gameMode === 'srt' && window._srtSelectedSrt === clientId) {
         srt.state = 'running';
@@ -469,12 +487,18 @@ function buildState() {
       pigs: survival.pigs.map(p => ({x:r2(p.x), z:r2(p.z), alive:p.alive, health:p.health})),
     };
   }
+  // 打猪枪战状态同步（客户端据此渲染猪）
+  let gunState = null;
+  if (gameMode === 'pigshoot' && typeof gun !== 'undefined') {
+    gunState = { wave: gun.wave, kills: gun.kills, waveActive: gun.waveActive,
+      pigs: gun.pigs.filter(p=>p.alive).map(p => ({x:r2(p.x), z:r2(p.z), health:p.health})) };
+  }
   // 捉迷藏模式状态同步
   let hideState = null;
   if (gameMode === 'hide') {
     hideState = { phase: hide.phase, timer: Math.max(0, Math.round(hide.timer * 10) / 10), seekerId: hide.seeker };
   }
-  return { time: Math.floor(gameTime), players, bots, gameOver:!gameRunning, mode:gameMode, blackpig:bp, srt:srtState, survival:survivalState, hide:hideState };
+  return { time: Math.floor(gameTime), players, bots, gameOver:!gameRunning, mode:gameMode, blackpig:bp, srt:srtState, survival:survivalState, hide:hideState, gun:gunState };
 }
 function hostBroadcastState() {
   const json = JSON.stringify({type:'state', ...buildState()});
@@ -1472,6 +1496,8 @@ function clientDetectDeaths(state) {
       if (prev[key] === true && !p.alive && typeof spawnKillBurst === 'function') spawnKillBurst(p.x, 1.4, p.z);
       prev[key] = !!p.alive;
     });
+    // 打猪枪战：客户端同步猪列表
+    if (state.gun && typeof gunClientSyncPigs === 'function') { gunClientSyncPigs(state.gun.pigs || []); }
     (state.players || []).forEach(pl => {
       const key = 'pl' + pl.id;
       if (prev[key] === true && pl.dead && typeof spawnKillBurst === 'function') spawnKillBurst(pl.x, 1.4, pl.z, 0x66aaff);
@@ -1825,6 +1851,21 @@ function mpUpdate(dt) {
     }
   } else if (MP.mode === 'client') {
     clientSendInput();    clientUpdateRemotePlayers(dt);
+    // ===== 捉迷藏抓捕者身份：每帧自愈同步 =====
+    // startGame 已加 MP.mode!==client 守卫，这里每帧兜底：以服务端 hide.seeker 为准修正身份与攻击键
+    if (gameMode === "hide" && gameRunning && typeof hide !== "undefined" && hide.seeker) {
+      const myId = MP.myId || "host";
+      const iAmSeeker = (hide.seeker === myId);
+      if (window._hideIAmSeeker !== iAmSeeker) {
+        window._hideIAmSeeker = iAmSeeker;
+        swordEquipped = iAmSeeker;
+        if (swordGroup) swordGroup.visible = iAmSeeker;
+        const ab = document.getElementById("attackBtn");
+        const hb = document.getElementById("hotbar");
+        if (ab) ab.style.display = iAmSeeker ? "flex" : "none";
+        if (hb) hb.style.display = iAmSeeker ? "flex" : "none";
+      }
+    }
     // 连接质量HUD更新
     updateConnHUD();
     // 生存模式猪的插值

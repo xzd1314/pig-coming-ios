@@ -195,6 +195,16 @@ function ensureESPIfNeeded() {
       }
     }
   }
+  // 打猪枪战猪（复用 survivalPig 渲染逻辑：ref.x/ref.z/ref.alive）
+  if (gameMode === 'pigshoot' && typeof gun !== 'undefined' && gun.pigs) {
+    for (const pig of gun.pigs) {
+      if (pig.alive && !_espWireframes.find(e => e.type === 'survivalPig' && e.ref === pig)) {
+        const box = createESPBox(3, 3.2, 3, 0xff4444);
+        scene.add(box);
+        _espWireframes.push({ mesh: box, type: 'survivalPig', ref: pig });
+      }
+    }
+  }
   // 联机其他玩家
   if (MP.mode === 'host') {
     for (const id in MP.players) {
@@ -279,6 +289,7 @@ function devAutoAim() {
 const MODE_NAMES = {
   normal: '普通模式', hunt: '打猪模式', blackpig: '黑猪模式', srt: 'SRT模式',
   pvp: 'PVP对战', survival: '打福瑞模式', hide: '捉迷藏模式',
+  pigshoot: '打猪枪战', pvpgun: 'PVP枪战',
 };
 let playerStats = loadPlayerStats();
 function loadPlayerStats() {

@@ -244,4 +244,31 @@ function setupInput() {
   }, {passive:false});
   // 物品栏 - 马来剑
   document.getElementById('slotSword').addEventListener('click', toggleSword);
+  // ===== 枪战模式移动端按钮 =====
+  const fireBtn = document.getElementById('gunFireBtn');
+  if (fireBtn) {
+    fireBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (typeof gunStartFire === 'function') gunStartFire();
+    }, {passive:false});
+    fireBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (typeof gunStopFire === 'function') gunStopFire();
+    }, {passive:false});
+  }
+  const reloadBtn = document.getElementById('gunReloadBtn');
+  if (reloadBtn) {
+    reloadBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (typeof gunTryReload === 'function') gunTryReload();
+    }, {passive:false});
+  }
+  const switchBtn = document.getElementById('gunSwitchBtn');
+  if (switchBtn) {
+    switchBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (typeof gun === 'undefined' || !gun || !gun.active) return;
+      if (typeof gunSwitchWeapon === 'function') gunSwitchWeapon(gun.weapon === 0 ? 1 : 0);
+    }, {passive:false});
+  }
 }

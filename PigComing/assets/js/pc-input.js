@@ -134,6 +134,20 @@
   document.addEventListener('mousedown', function(e){
     if (pointerLocked && e.button === 0) { tryAttack(); }
   });
+  // 鼠标松开 → 枪战停止开火
+  document.addEventListener('mouseup', function(e){
+    if (e.button === 0 && typeof gunStopFire === 'function') { try { gunStopFire(); } catch(err){} }
+  });
+
+  // 枪战快捷键：1/2 切枪，R 换弹，V 全自动/半自动
+  document.addEventListener('keydown', function(e){
+    if (isTyping(e)) return;
+    if (typeof gun === 'undefined' || !gun || !gun.active) return;
+    if (e.code === 'Digit1') { gunSwitchWeapon(0); }
+    else if (e.code === 'Digit2') { gunSwitchWeapon(1); }
+    else if (e.code === 'KeyR') { gunTryReload(); }
+    else if (e.code === 'KeyV') { gunToggleFireMode(); }
+  });
 
   // ---------- 主循环 ----------
   function updateInput(){

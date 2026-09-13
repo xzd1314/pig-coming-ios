@@ -126,6 +126,11 @@ function update(dt) {
     if (gameMode === 'pvp') {
       $('distance').textContent = '击杀数: ' + (window.pvpKills || 0);
     }
+    // 枪战模式客户端：更新枪械UI/换弹（猪AI与伤害由主机权威）
+    if ((gameMode === 'pigshoot' || gameMode === 'pvpgun') && typeof gunUpdate === 'function') {
+      gunUpdate(dt);
+      $('distance').textContent = '击杀: ' + (window.pvpKills || 0);
+    }
     // SRT客户端显示SRT距离
     if (gameMode === 'srt' && !srtIsPlayerSRT && srt.mesh) {
       const sdx = srt.x - player.x, sdz = srt.z - player.z;
@@ -163,6 +168,8 @@ function update(dt) {
     updateBlackpig(dt);
   } else if (gameMode === 'pvp') {
     updatePvpGame(dt);
+  } else if (gameMode === 'pigshoot' || gameMode === 'pvpgun') {
+    updatePigShootGame(dt);
   } else if (gameMode === 'srt') {
     updateSRTGame(dt);
   } else if (gameMode === 'survival') {
@@ -526,7 +533,29 @@ function updateSurvivalGame(dt) {
   if (settings.dayMode) updateClouds(dt);
 }
 
-// ==================== 捉迷藏模式 ====================
+// ==================== 枪战模式（打猪枪战 / PVP枪战） ====================
+function updatePigShootGame(dt) {
+  // 玩家移动（空旷场地，边界限制）
+  let speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;
+  speed *= devSpeedMult();
+  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  const mx = (-sy*joystick.dy + cy*joystick.dx)*speed*dt;
+  const mz = (-cy*joystick.dy - sy*joystick.dx)*speed*dt;
+  const half = 28;
+  player.x = Math.max(-half, Math.min(half, player.x + mx));
+  player.z = Math.max(-half, Math.min(half, player.z + mz));
+  // 跳跃物理
+  if (!player.onGround) {
+    player.vy += GRAVITY*dt; player.jumpY += player.vy*dt;
+    if (player.jumpY <= 0) { player.jumpY = 0; player.vy = 0; player.onGround = true; }
+  }
+  camera.position.set(player.x, PLAYER_H+player.jumpY, player.z);
+  camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
+  // 枪战核心逻辑（射击/换弹/后坐力/猪AI）
+  if (typeof gunUpdate === 'function') gunUpdate(dt);
+  if (settings.gasMode) updateGasParticles(dt);
+  if (settings.dayMode) updateClouds(dt);
+}
 function updateHideGame(dt) {
   // 全员可移动（躲藏者逃跑、抓捕者巡逻），使用捉迷藏地图碰撞
   let speed = sprintActive ? SPRINT_SPEED : PLAYER_SPEED;

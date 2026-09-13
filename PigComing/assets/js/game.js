@@ -4,7 +4,8 @@ function resetAllUI() {
   const allScreens = ['startScreen','gameOverScreen','modeSelectScreen','playerSelectScreen',
     'srtSubMenu','srtMultiLobby','aboutScreen','settingsPanel','multiplayerScreen',
     'nameDialog','ipDialog','survivalSubMenu','survivalMultiLobby','survivalShop',
-    'devCheatPanel','devPasswordDialog','mpWaitScreen','hideSubMenu','hideMultiLobby','myInfoScreen'];
+    'devCheatPanel','devPasswordDialog','mpWaitScreen','hideSubMenu','hideMultiLobby','myInfoScreen',
+    'pigshootSubMenu','pvpgunSubMenu'];
   for (const id of allScreens) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -14,7 +15,8 @@ function resetAllUI() {
     'attackBtn','hotbar','srtStatus','srtHealthBar','srtOKBtn',
     'survivalWaveInfo','survivalPoints','survivalShopBtn',
     'blackpigStatus','punishOverlay','pauseLabel','dangerOverlay','gasOverlay','hitFlash',
-    'hideInfo','hideBlackout'];
+    'hideInfo','hideBlackout',
+    'gunCrosshair','gunAmmo','gunWaveInfo','gunFireBtn','gunReloadBtn','gunSwitchBtn'];
   for (const id of allHud) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -163,6 +165,18 @@ function startGame(mode) {
     swordEquipped = true;
     if (swordGroup) swordGroup.visible = true;
     survivalInit();
+  } else if (gameMode === 'pigshoot' || gameMode === 'pvpgun') {
+    // 枪战模式：空旷场地，猪群(pigshoot)或纯PVP(pvpgun)
+    if (typeof gunCleanup === 'function') gunCleanup();
+    buildEmptyArena();
+    player.x = 0; player.z = 0;
+    if (nextbot.mesh) nextbot.mesh.visible = false;
+    if (nextbot.glowMesh) nextbot.glowMesh.visible = false;
+    if (nextbotAudio) { nextbotAudio.pause(); nextbotAudio.currentTime = 0; }
+    nextbot.alive = false;
+    playerHealth = 100;
+    window.pvpKills = 0;
+    if (typeof gunInit === 'function') gunInit(gameMode);
   } else if (gameMode === 'hide') {
     // 捉迷藏模式：新地图，抓捕者开局蒙眼10秒
     buildHideMap();
@@ -209,9 +223,10 @@ function startGame(mode) {
   // 模式特定UI
   let showSword = (gameMode === 'hunt' || gameMode === 'pvp' || gameMode === 'srt' || gameMode === 'survival');
   if (gameMode === 'hide') showSword = (window._hideIAmSeeker === true); // 捉迷藏只有抓捕者持剑
-  document.getElementById('attackBtn').style.display = showSword ? 'flex' : 'none';
-  document.getElementById('hotbar').style.display = showSword ? 'flex' : 'none';
-  document.getElementById('healthBarContainer').style.display = showSword ? 'block' : 'none';
+  const gunMode = (gameMode === 'pigshoot' || gameMode === 'pvpgun');
+  document.getElementById('attackBtn').style.display = (showSword && !gunMode) ? 'flex' : 'none';
+  document.getElementById('hotbar').style.display = (showSword && !gunMode) ? 'flex' : 'none';
+  document.getElementById('healthBarContainer').style.display = (showSword || gunMode) ? 'block' : 'none';
   document.getElementById('pigHealthBarContainer').style.display = (gameMode === 'hunt') ? 'block' : 'none';
   if (gameMode === 'pvp') document.getElementById('slotSword').classList.add('active');
   // SRT玩家不显示攻击按钮和物品栏
@@ -261,6 +276,8 @@ function gameOver(reason) {
   bpStopAll();
   // 生存模式：清理猪
   if (gameMode === 'survival' && typeof survivalCleanup === 'function') survivalCleanup();
+  // 枪战模式：清理猪/视图/HUD
+  if ((gameMode === 'pigshoot' || gameMode === 'pvpgun') && typeof gunCleanup === 'function') gunCleanup();
   // 联机：通知游戏结束
   if (MP.mode !== 'offline') mpOnGameOver();
 }
@@ -356,6 +373,15 @@ function updateHealthUI() {
 }
 // ==================== 打猪模式 - 挥刀攻击 ====================
 function doAttack() {
+  // 枪战模式：左键=开始开火（持续射击由gunUpdate处理，松开由mouseup停止）
+  if (gameMode === 'pigshoot' || gameMode === 'pvpgun') {
+    if (!gameRunning || gamePaused) return;
+    if (MP.mode === 'client' && MP._clientDead) return;
+    if (MP.mode === 'host' && MP._hostDead) return;
+    if (playerHealth <= 0) return;
+    gunStartFire();
+    return;
+  }
   if ((gameMode !== 'hunt' && gameMode !== 'pvp' && gameMode !== 'srt' && gameMode !== 'survival' && gameMode !== 'hide') || !gameRunning || gamePaused) return;
   if (!swordEquipped) return;
   if (attackAnimTimer > 0) return;
@@ -676,6 +702,12 @@ function setupMenu() {
         document.getElementById('modeSelectScreen').style.display = 'none';
         document.getElementById('hideSubMenu').style.display = 'flex';
         document.getElementById('hidePlayerCount').style.display = 'flex';
+      } else if (card.dataset.mode === 'pigshoot') {
+        document.getElementById('modeSelectScreen').style.display = 'none';
+        document.getElementById('pigshootSubMenu').style.display = 'flex';
+      } else if (card.dataset.mode === 'pvpgun') {
+        document.getElementById('modeSelectScreen').style.display = 'none';
+        document.getElementById('pvpgunSubMenu').style.display = 'flex';
       } else {
         startGame(card.dataset.mode);
       }
@@ -929,6 +961,37 @@ function setupMenu() {
       Bridge.send(JSON.stringify({type:'srtReady', token:MP._handshakeToken}));
     }
   });
+  // ===== 打猪枪战 子菜单 =====
+  document.getElementById('pigshootBackBtn').addEventListener('click', () => {
+    document.getElementById('pigshootSubMenu').style.display = 'none';
+    document.getElementById('modeSelectScreen').style.display = 'flex';
+  });
+  document.getElementById('pigshootSingleBtn').addEventListener('click', () => {
+    document.getElementById('pigshootSubMenu').style.display = 'none';
+    window._isMultiplayer = false;
+    startGame('pigshoot');
+  });
+  document.getElementById('pigshootMultiBtn').addEventListener('click', () => {
+    document.getElementById('pigshootSubMenu').style.display = 'none';
+    window._isMultiplayer = true;
+    startGame('pigshoot');
+  });
+  // ===== PVP枪战 子菜单 =====
+  document.getElementById('pvpgunBackBtn').addEventListener('click', () => {
+    document.getElementById('pvpgunSubMenu').style.display = 'none';
+    document.getElementById('modeSelectScreen').style.display = 'flex';
+  });
+  document.getElementById('pvpgunSingleBtn').addEventListener('click', () => {
+    document.getElementById('pvpgunSubMenu').style.display = 'none';
+    window._isMultiplayer = false;
+    if (typeof showToast === 'function') showToast('单人练习模式（推荐多人联机对战）', 2000);
+    startGame('pvpgun');
+  });
+  document.getElementById('pvpgunMultiBtn').addEventListener('click', () => {
+    document.getElementById('pvpgunSubMenu').style.display = 'none';
+    window._isMultiplayer = true;
+    startGame('pvpgun');
+  });
   // ===== 捉迷藏模式（多人专属） =====
   let hideSelectedCount = 2;
   document.getElementById('hideBackBtn').addEventListener('click', () => {
@@ -1127,7 +1190,7 @@ function renderRoomList(rooms) {
   for (const room of rooms) {
     const item = document.createElement('div');
     item.className = 'mp-room-item';
-    const modeMap = {hunt:'打猪模式', blackpig:'黑猪模式', normal:'普通模式', srt:'SRT模式', pvp:'PVP对战', hide:'捉迷藏', survival:'打福瑞模式'};
+    const modeMap = {hunt:'打猪模式', blackpig:'黑猪模式', normal:'普通模式', srt:'SRT模式', pvp:'PVP对战', hide:'捉迷藏', survival:'打福瑞模式', pigshoot:'打猪枪战', pvpgun:'PVP枪战'};
     const modeName = modeMap[room.mode] || '普通模式';
     item.innerHTML = `
       <div class="mp-room-info">
